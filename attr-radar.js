@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.3';
-  const CHANGES = '구간: 방송실적관리를 프로그램순으로 한 번 보면 순서까지 정확해요. 주방송상품별로만 보면 노출분 길이는 맞추고 시작 시각은 판매로 찾아요. 상품이 많은 방송도 끝까지 읽어요.';
+  const VER = '4.4';
+  const CHANGES = '요약 C에서 펼친 상품이 다시 닫히지 않아요. 구간: 방송실적관리를 프로그램순으로 한 번 보면 순서까지 정확해요. 주방송상품별로만 보면 노출분 길이는 맞추고 시작 시각은 판매로 찾아요. 상품이 많은 방송도 끝까지 읽어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -36,7 +36,7 @@
   const LABELS = [['미리', 'pre'], ['방송', 'live'], ['가능', 'avail'], ['기본', 'base'], ['추가', 'add'], ['상품내', 'inProd'], ['PGM', 'inPgm']];
   const DEFAULT_COLS = ['pre', 'live', 'avail', 'base', 'add', 'inProd', 'inPgm'];
 
-  const S = { rows: new Map(), hist: [], lastTop: null, alerted: new Map(), log: [], lastScan: 0, cols: null, tab: cfg.ui.tab || 'top', heatProd: null, prodJd: new Map(), prodSums: null, colJd: new Map(), colSums: null, lastTopCol: new Map(), lastTopProd: null, parked: new Map(), scopeSig: '', quiet: 2 };
+  const S = { rows: new Map(), hist: [], lastTop: null, alerted: new Map(), log: [], lastScan: 0, cols: null, tab: cfg.ui.tab || 'top', heatProd: null, prodJd: new Map(), prodSums: null, colJd: new Map(), colSums: null, lastTopCol: new Map(), lastTopProd: null, parked: new Map(), scopeSig: '', quiet: 2, detOpen: new Map() };
 
   // ---------- 기록 (브라우저 localStorage, 날짜별, 7일 보관) ----------
   // 값이 바뀐 속성만 [시각, 속성번호, 미리, 방송, 가능] 으로 쌓는다.
@@ -772,7 +772,7 @@
     }
     h.push(`<h5 id="sC">C. 공급비중 vs 판매비중 <span class="muted">▲▼ = 10%p 이상 차이</span></h5><div class="muted" style="margin-bottom:4px">주문소진 = 준비수량 중 주문이 들어온 비율(취소·반품 전). 품절 위험을 볼 때 써요.</div>`);
     const tbl = (rows, lab) => `<table class="sh"><tr><th>${lab}</th><th>공급</th><th>판매</th><th>차이(%p)</th><th>주문소진</th></tr>${rows.map(o => `<tr><td>${esc(o.n)}</td><td>${Math.round(o.sup)}%</td><td><b>${Math.round(o.sal)}%</b></td><td class="${o.gap >= 10 ? 'up' : o.gap <= -10 ? 'dn' : 'muted'}">${gapTag(o.gap)}${Math.round(o.gap) > 0 ? '+' : ''}${Math.round(o.gap)}</td><td>${Math.round(o.st)}%</td></tr>`).join('')}</table>`;
-    m.prods.filter(x => x.colors.length || x.sizes.length).forEach((x, i) => h.push(`<details ${i === 0 ? 'open' : ''}><summary>${esc(nm(x.p))}</summary>${x.colors.length ? tbl(x.colors, '컬러') : ''}${x.sizes.length ? tbl(x.sizes, '사이즈') : ''}</details>`));
+    m.prods.filter(x => x.colors.length || x.sizes.length).forEach((x, i) => h.push(`<details data-dp="${esc(x.p)}" ${(S.detOpen.has(x.p) ? S.detOpen.get(x.p) : i === 0) ? 'open' : ''}><summary>${esc(nm(x.p))}</summary>${x.colors.length ? tbl(x.colors, '컬러') : ''}${x.sizes.length ? tbl(x.sizes, '사이즈') : ''}</details>`));
     h.push(`<h5 id="sD">D. 품절과 놓친 판매</h5>`);
     h.push(m.sold.length ? m.sold.map(o => `<div class="row"><span>${esc(nm(o.a.p))} ${esc([o.a.color, o.a.size].filter(v => v !== '-').join(' '))}${o.before !== null && o.before > 0 ? `<div class="muted">품절 후 상품 분당 판매 ${o.after >= o.before ? '+' : ''}${Math.round((o.after - o.before) / o.before * 100)}%</div>` : ''}</span><b class="warn">${o.t ? hm(o.t) : '품절'}</b><span class="muted">${o.lost ? `놓친 약 ${fmt(o.lost)}${o.until ? ` (${hm(o.until)}까지)` : ''}` : ''}</span></div>`).join('') : '<p class="muted">방송 중 품절된 속성이 없어요.</p>');
     h.push(`<h5 id="sE">E. 다음 액션 후보 <span class="muted">(판단은 담당자)</span></h5>`);
@@ -1273,6 +1273,8 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
       render();
     }
   });
+  // 요약 C의 상품 펼침 상태 기억 (화면을 다시 그려도 유지)
+  root.addEventListener('toggle', e => { const d = e.target; if (d.dataset && d.dataset.dp !== undefined) S.detOpen.set(d.dataset.dp, d.open); }, true);
   root.addEventListener('change', e => {
     if (e.target.dataset.heat !== undefined) { S.heatProd = e.target.value; return render(); }
     if (e.target.dataset.al !== undefined) return;
