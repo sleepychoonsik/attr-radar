@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.4';
-  const CHANGES = '요약 C에서 펼친 상품이 다시 닫히지 않아요. 구간: 방송실적관리를 프로그램순으로 한 번 보면 순서까지 정확해요. 주방송상품별로만 보면 노출분 길이는 맞추고 시작 시각은 판매로 찾아요. 상품이 많은 방송도 끝까지 읽어요.';
+  const VER = '4.5';
+  const CHANGES = '품절임박 기준을 회사 매진 기준(소진율 70% 매진예상 · 80% 매진임박 · 95% 매진)으로 바꿨어요. 단계마다 파랑·노랑·빨강으로 보여주고 단계가 오를 때 알려요. 잔여·소진 예상 시간 기준은 ⚙에서 \'회사+예측\'을 고르면 함께 써요. 알림 기록에 속성·단계·소진율·예상 분을 따로 남겨요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -13,10 +13,11 @@
   const CFG_KEY = 'attrRadarCfg';
   // 탭 묶음: 지금 순위 | 챙길 것(배지) | 흐름·정리 | 설정
   const TAB_GROUPS = [[['prod', '상품'], ['color', '컬러'], ['top', '속성']], [['surge', '급상승'], ['sold', '품절임박']], [['graph', '그래프'], ['sum', '요약'], ['log', '알림']], [['set', '⚙']]];
-  const DEF = { interval: 5, win: 3, soldPct: 70, soldQty: 10, soldEta: 15, surge: 10, metric: '방송', refreshSel: '', autoRefresh: 0, brand: '', alias: {}, al: { prod: true, color: true, attr: true, surge: true, sold: true, end: true }, quietMode: false, ui: {}, sumOpen: false };
+  const DEF = { interval: 5, win: 3, soldPct: 70, soldQty: 10, soldEta: 15, soldMode: '회사', surge: 10, metric: '방송', refreshSel: '', autoRefresh: 0, brand: '', alias: {}, al: { prod: true, color: true, attr: true, surge: true, sold: true, end: true }, quietMode: false, ui: {}, sumOpen: false };
   let cfg = DEF;
   try { cfg = Object.assign({}, DEF, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); } catch (e) {}
   if (!cfg.v2) { if (cfg.soldQty === 50) cfg.soldQty = 10; cfg.v2 = true; } // 잔여 50개 기준은 재고 적은 속성이 너무 많이 걸려서 10개로
+  if (!cfg.v3) { cfg.soldMode = '회사'; cfg.v3 = true; } // v4.5: 기본은 회사 매진 기준
   cfg.al = Object.assign({}, DEF.al, cfg.al); cfg.alias = cfg.alias || {}; cfg.ui = cfg.ui || {};
   const saveCfg = () => { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {} };
 
@@ -303,6 +304,11 @@
     checkEnd();
   }
 
+  // ---------- 회사 매진 기준 (생판종 주문수량관리: 주문가능(기본+추가) 소진율) ----------
+  // 소진율 = (미리+방송 주문) / (미리+방송 주문 + 주문가능)
+  const LV = [null, { n: 1, min: 70, name: '매진예상', icon: '🔵', cls: 'lv1' }, { n: 2, min: 80, name: '매진임박', icon: '🟡', cls: 'lv2' }, { n: 3, min: 95, name: '매진', icon: '🔴', cls: 'lv3' }];
+  const lvOf = pct => (pct >= 95 ? 3 : pct >= 80 ? 2 : pct >= 70 ? 1 : 0);
+  const usePred = () => cfg.soldMode === '회사+예측';
   const metric = r => (cfg.metric === '총' ? (r.pre || 0) + (r.live || 0) : (r.live || 0));
 
   function snapshot() {
@@ -346,9 +352,12 @@
       const pct = tot + avail > 0 ? tot / (tot + avail) * 100 : 0;
       const rate = rateMap.get(r.key) || 0;
       const eta = rate > 0 && mins >= 1 ? avail / rate : null; // 1분 이상 쌓인 뒤에만 소진 예상
-      if (tot > 0 && (pct >= cfg.soldPct || avail <= cfg.soldQty || (eta !== null && eta <= cfg.soldEta))) out.push({ r, pct, avail, eta });
+      if (tot <= 0) return;
+      const lv = avail > 0 ? lvOf(pct) : 3;
+      const why = usePred() ? [avail <= cfg.soldQty && 'qty', eta !== null && eta <= cfg.soldEta && 'eta'].filter(Boolean) : [];
+      if (lv || why.length) out.push({ r, pct, avail, eta, lv, why });
     });
-    return out.sort((a, b) => (a.eta ?? 1e9) - (b.eta ?? 1e9) || a.avail - b.avail);
+    return out.sort((a, b) => b.lv - a.lv || (a.eta ?? 1e9) - (b.eta ?? 1e9) || a.avail - b.avail);
   }
 
   function analyze() {
@@ -406,7 +415,13 @@
       if (S.lastTop && S.lastTop !== top.key) alert('🥇 1위 교체', `${short(top)} (${fmt(metric(top))})`, 'attr', top.prod);
       S.lastTop = top.key;
     }
-    SO.forEach(x => once('so:' + x.r.key, 30, '⚠️ 품절임박', `${short(x.r)} 잔여 ${fmt(x.avail)}${x.eta !== null ? ` · 약 ${Math.ceil(x.eta)}분` : ''}`, 'sold', x.r.prod));
+    // 단계가 오를 때마다 한 번씩 (같은 단계는 다시 안 울림). 예측 기준은 회사 단계가 없을 때만 30분에 한 번
+    SO.forEach(x => {
+      const info = { k: x.r.key, pct: Math.round(x.pct), eta: x.eta !== null ? Math.ceil(x.eta) : null, avail: x.avail };
+      const msg = `${short(x.r)} 소진율 ${Math.round(x.pct)}% · 잔여 ${fmt(x.avail)}${x.eta !== null ? ` · 약 ${Math.ceil(x.eta)}분` : ''}`;
+      if (x.lv) once('so:' + x.r.key + ':' + x.lv, 24 * 60, `${LV[x.lv].icon} ${LV[x.lv].name}`, msg, 'sold', x.r.prod, { ...info, lv: x.lv, why: 'pct' });
+      else once('so:' + x.r.key + ':p', 30, '⏱ 소진 예측', msg, 'sold', x.r.prod, { ...info, lv: 0, why: x.why.join('+') });
+    });
     const s = D.list.find(x => live(x.r));
     if (s && s.d >= cfg.surge) once('su:' + s.r.key, cfg.win, '🔥 급상승', `${short(s.r)} +${fmt(s.d)} / ${Math.max(1, Math.round(D.mins))}분`, 'surge', s.r.prod);
     render();
@@ -416,16 +431,17 @@
   const attrL = r => [r.color, r.size].filter(x => x && x !== '-').join(' ');
   const short = r => `${shortP(r.prod)} ${attrL(r)}`;
 
-  function once(id, mins, title, msg, type, p) {
+  function once(id, mins, title, msg, type, p, x) {
     const last = S.alerted.get(id);
     if (last && Date.now() - last < mins * 60000) return;
     S.alerted.set(id, Date.now());
-    alert(title, msg, type, p);
+    alert(title, msg, type, p, x);
   }
 
-  function alert(title, msg, type, p) {
-    S.log.unshift({ t: Date.now(), title, msg, p });
-    REC.log.unshift({ t: Date.now(), title, msg, p }); recSave();
+  function alert(title, msg, type, p, x) {
+    const e = { t: Date.now(), title, msg, p, ...(x || {}), q: S.quiet > 0 ? 1 : 0 }; // q=1: 켠 직후(이미 그런 상태)
+    S.log.unshift(e);
+    REC.log.unshift(e); recSave();
     S.log.length = Math.min(S.log.length, 100);
     // 켠 직후·상품이 바뀐 직후 2번의 확인은 '이미 그런 상태'라 알림 탭에만 남기고 팝업은 생략
     if (S.quiet > 0) return;
@@ -525,7 +541,7 @@
     });
     return lines;
   }
-  const logLines = logs => [['날짜', '시각', '알림', '내용'].join(',')].concat(logs.map(l => [ymd(l.t), hhmmss(l.t), l.title, l.msg].map(q).join(',')));
+  const logLines = logs => [['날짜', '시각', '알림', '내용', '속성키', '단계', '소진율', '잔여', '예상분', '발동', '켠직후'].join(',')].concat(logs.map(l => [ymd(l.t), hhmmss(l.t), l.title, l.msg, l.k, l.lv, l.pct, l.avail, l.eta, l.why, l.q].map(q).join(',')));
   function exportHistory(all) {
     const R = broadcastRange(), { rows } = all ? allRecords() : allRecords(R.from, R.to);
     if (!rows.length) return toast('기록 없음', all ? '저장된 기록이 없어요.' : '이번 방송 시간대 기록이 없어요.');
@@ -916,6 +932,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .row{display:grid;grid-template-columns:1fr 46px auto;gap:6px;align-items:center;padding:2px 0}.row>span:last-child{white-space:nowrap;min-width:52px}
     .bar{height:6px;background:#cce7ff;border-radius:3px}.bar i{display:block;height:100%;background:#0088ff;border-radius:3px}
     .muted{color:#6e7781;font-size:11px}.up{color:#d1242f;font-weight:700}.dn{color:#2f6fde;font-weight:700}
+    .lvb{font-style:normal;font-size:10px;font-weight:700;padding:0 4px;border-radius:3px}.lv1{background:#cfe3ff;color:#0b4a9e}.lv2{background:#ffe680;color:#6b4e00}.lv3{background:#ff3b30;color:#fff}.lv0{background:#eaeef2;color:#57606a}
     h5{margin:12px 0 6px;font-size:12px;color:#0088ff;border-top:1px solid #eaeef2;padding-top:8px}details{margin:2px 0 6px}summary{cursor:pointer;font-weight:600;font-size:12px}
     table.sh{width:100%;border-collapse:collapse;font-size:11px;margin:3px 0 6px}table.sh th,table.sh td{padding:2px 4px;text-align:right;border-bottom:1px solid #f0f2f4;white-space:nowrap}table.sh th{color:#6e7781;font-weight:600}table.mx td,table.mx th{text-align:center!important;border:1px solid #eaeef2}table.sh td:first-child,table.sh th:first-child{text-align:left;white-space:normal}.warn{color:#bc4c00;font-weight:700}
     table{border-collapse:collapse;width:100%;font-size:12px}td,th{border:1px solid #eee;text-align:center;padding:4px 2px}th{background:#fafafa}
@@ -1002,7 +1019,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     const rest = [cTop && `🏆 상품 1위 ${esc(shortP(tp.p))} <span class="muted">${fmt(tp.sum)}개</span>${tp.jd ? ` <span class="up">${sg(tp.jd)}</span>` : ''}`,
       top ? `🥇 속성 1위 ${esc(short(top))} <span class="muted">${fmt(metric(top))}개</span>` : '🥇 속성 1위 <span class="muted">상품이 모두 접혀 있음</span>',
       jl.length && `⏱️ 직전 대비(${hhmmss(S.jump.t)}) <span class="up">${sg(jl.reduce((a, r) => a + r.jd, 0))}</span> <span class="muted">${jl.slice(0, 3).map(r => esc(`${attrL(r)} ${sg(r.jd)}`)).join(' · ')}</span>`,
-      v.SO.length && `⚠️ 품절임박 ${v.SO.length}개`].filter(Boolean);
+      v.SO.length && `⚠️ 품절임박 ${v.SO.length}개 (${[3, 2, 1].map(n => [n, v.SO.filter(x => x.lv === n).length]).filter(a => a[1]).map(([n, c]) => LV[n].icon + c).join(' ') || '예측'})`].filter(Boolean);
     $('.sum').innerHTML = `<div class="ln">${l1}</div><div class="ln">${l2}</div>` + (cfg.sumOpen ? rest.map(x => `<div class="ln">${x}</div>`).join('') + '<button class="more" data-a="more">접기 ▴</button>' : `<button class="more" data-a="more">더보기 ▾ (상품 1위 · 속성 1위 · 직전 대비${v.SO.length ? ` · 품절임박 ${v.SO.length}` : ''})</button>`);
     $('.p').classList.toggle('wide', S.tab === 'graph');
     // 탭이 한 줄에 다 들어가도록 패널 너비 자동 조정
@@ -1071,9 +1088,11 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
 
   function soldHtml() {
     const { SO } = S.view;
-    if (!SO.length) return `<p class="muted">품절임박 속성 없음 (기준: 소진율 ${cfg.soldPct}% 이상, 잔여 ${cfg.soldQty}개 이하, 또는 ${cfg.soldEta}분 내 소진 예상)</p>`;
-    return `<div class="row colhd"><span>상품 · 속성</span><span>잔여</span><span>소진율 · 남은 시간</span></div>` + SO.map(x => `<div class="row"><span>${esc(short(x.r))}</span><b class="warn">${fmt(x.avail)}</b><span class="muted">${Math.round(x.pct)}%${x.eta !== null ? ` · ${Math.ceil(x.eta)}분` : ''}</span></div>`).join('') +
-      `<p class="muted">잔여 = 주문가능 · % = 소진율 · 분 = 현재 속도면 남은 시간</p>`;
+    const rule = `회사 기준: 소진율 70% 매진예상 · 80% 매진임박 · 95% 매진${usePred() ? ` + 예측: 잔여 ${cfg.soldQty}개 이하 또는 ${cfg.soldEta}분 내 소진 예상` : ''}`;
+    if (!SO.length) return `<p class="muted">품절임박 속성 없음 (${rule})</p>`;
+    const tag = x => (x.lv ? `<i class="lvb ${LV[x.lv].cls}">${LV[x.lv].name}</i>` : '<i class="lvb lv0">예측</i>');
+    return `<div class="row colhd"><span>상품 · 속성</span><span>잔여</span><span>단계 · 소진율 · 남은 시간</span></div>` + SO.map(x => `<div class="row"><span>${esc(short(x.r))}</span><b class="warn">${fmt(x.avail)}</b><span class="muted">${tag(x)} ${Math.round(x.pct)}%${x.eta !== null ? ` · ${Math.ceil(x.eta)}분` : ''}</span></div>`).join('') +
+      `<p class="muted">${rule}<br>잔여 = 주문가능 · % = 소진율 = 주문(미리+방송) ÷ (주문 + 주문가능) · 분 = 현재 속도면 남은 시간</p>`;
   }
 
   // ---------- 그래프: 상품별 시간대 판매량 (기록 기반) ----------
@@ -1203,7 +1222,9 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     return `<div class="set">
       <label>기준 지표<select data-k="metric"><option ${cfg.metric === '방송' ? 'selected' : ''}>방송</option><option ${cfg.metric === '총' ? 'selected' : ''}>총</option></select></label>
       ${f('interval', '표 확인 간격', '초')}${f('win', '급상승 비교 구간', '분')}${f('surge', '급상승 알림 기준', '개 이상')}
-      ${f('soldPct', '품절임박 소진율', '%')}${f('soldQty', '품절임박 잔여', '개 이하')}${f('soldEta', '품절임박 소진 예상', '분 이내')}
+      <label>품절임박 기준<select data-k="soldMode"><option ${cfg.soldMode !== '회사+예측' ? 'selected' : ''}>회사</option><option ${cfg.soldMode === '회사+예측' ? 'selected' : ''}>회사+예측</option></select></label>
+      <div class="muted">회사 = 생판종 매진 기준(소진율 70% 매진예상 · 80% 매진임박 · 95% 매진). 회사+예측 = 여기에 아래 두 기준을 더해 더 일찍 알려요(대신 알림이 늘어요).</div>
+      ${f('soldQty', '예측: 잔여', '개 이하')}${f('soldEta', '예측: 소진 예상', '분 이내')}
       <h4 style="margin:12px 0 4px">🔔 팝업으로 받을 알림</h4>
       ${[['prod', '🏆 상품 1위 교체'], ['color', '🎨 컬러 1위 교체'], ['attr', '🥇 속성 1위 교체'], ['surge', '🔥 급상승'], ['sold', '⚠️ 품절임박'], ['end', '📋 방송 종료 요약']].map(([k, l]) => `<label>${l}<input data-al="${k}" type="checkbox" ${cfg.al[k] !== false ? 'checked' : ''} style="width:auto"></label>`).join('')}
       <div class="muted">끈 알림도 알림 탭에는 남아요. 제목줄 🔔를 누르면 모든 팝업을 잠시 멈춰요(조용히 모드).</div>
