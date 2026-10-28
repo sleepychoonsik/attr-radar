@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.5';
-  const CHANGES = '품절임박 기준을 회사 매진 기준(소진율 70% 매진예상 · 80% 매진임박 · 95% 매진)으로 바꿨어요. 단계마다 파랑·노랑·빨강으로 보여주고 단계가 오를 때 알려요. 잔여·소진 예상 시간 기준은 ⚙에서 \'회사+예측\'을 고르면 함께 써요. 알림 기록에 속성·단계·소진율·예상 분을 따로 남겨요.';
+  const VER = '4.7';
+  const CHANGES = '화면을 정리했어요: 속성 탭이 컬러×사이즈 표로 바뀌어 모든 속성이 한눈에 보여요. 상품·컬러·속성·품절 탭에 판매·최근·잔여·매진현황이 같은 칸으로 나오고, 기본은 지금 구간 상품만 보여요(탭 위에서 방송 전체로 바꿀 수 있어요). 품절 알림은 예측으로 미리 알리고 당사 매진 기준(70·80·95%)은 매진현황으로 표시해요. 패널 왼쪽 모서리를 끌면 폭을 바꿀 수 있어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -12,12 +12,12 @@
   // ---------- 설정 ----------
   const CFG_KEY = 'attrRadarCfg';
   // 탭 묶음: 지금 순위 | 챙길 것(배지) | 흐름·정리 | 설정
-  const TAB_GROUPS = [[['prod', '상품'], ['color', '컬러'], ['top', '속성']], [['surge', '급상승'], ['sold', '품절임박']], [['graph', '그래프'], ['sum', '요약'], ['log', '알림']], [['set', '⚙']]];
-  const DEF = { interval: 5, win: 3, soldPct: 70, soldQty: 10, soldEta: 15, soldMode: '회사', surge: 10, metric: '방송', refreshSel: '', autoRefresh: 0, brand: '', alias: {}, al: { prod: true, color: true, attr: true, surge: true, sold: true, end: true }, quietMode: false, ui: {}, sumOpen: false };
+  const TAB_GROUPS = [[['prod', '상품'], ['color', '컬러'], ['top', '속성']], [['surge', '급상승'], ['sold', '품절']], [['graph', '그래프'], ['sum', '리뷰'], ['log', '알림']], [['set', '⚙']]];
+  const DEF = { interval: 5, win: 3, soldPct: 70, soldQty: 10, soldEta: 15, soldMode: '예측', surge: 10, metric: '방송', refreshSel: '', autoRefresh: 0, brand: '', alias: {}, al: { prod: true, color: true, attr: true, surge: true, sold: true, lv: false, end: true }, quietMode: false, ui: {}, sumOpen: false };
   let cfg = DEF;
   try { cfg = Object.assign({}, DEF, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); } catch (e) {}
   if (!cfg.v2) { if (cfg.soldQty === 50) cfg.soldQty = 10; cfg.v2 = true; } // 잔여 50개 기준은 재고 적은 속성이 너무 많이 걸려서 10개로
-  if (!cfg.v3) { cfg.soldMode = '회사'; cfg.v3 = true; } // v4.5: 기본은 회사 매진 기준
+  if (!cfg.v4) { cfg.soldMode = '예측'; cfg.v4 = true; cfg.v3 = true; } if (cfg.soldMode === '회사') cfg.soldMode = '당사'; // v4.6: 기본은 예측 알림 + 당사 기준 매진현황
   cfg.al = Object.assign({}, DEF.al, cfg.al); cfg.alias = cfg.alias || {}; cfg.ui = cfg.ui || {};
   const saveCfg = () => { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {} };
 
@@ -117,7 +117,7 @@
     const m = BRANDS.map(b => [bkey(b), b]).concat(Object.entries(ALIAS).map(([a, b]) => [bkey(a), b])).concat(Object.entries(cfg.alias).map(([a, b]) => [bkey(a), b]));
     return (BTAB = m.filter(x => x[0]).sort((a, b) => b[0].length - a[0].length));
   };
-  const bStrip = p => String(p).replace(/\s*\(\d+\)$/, '').trim().replace(/^(남|여|공용|남녀|아동|키즈|유아)\)\s*/, '').replace(/^[A-Z](?=[가-힣])/, '');
+  const bStrip = p => String(p).replace(/\s*\(\d+\)$/, '').trim().replace(/^(남|여|공용|남녀|아동|키즈|유아|롱|숏|[가-힣A-Za-z]{1,2})\)\s*/, '').replace(/^[A-Z](?=[가-힣])/, '');
   const BCACHE = new Map();
   function brandOf(p) {
     if (BCACHE.has(p)) return BCACHE.get(p);
@@ -180,7 +180,17 @@
   let TSEG = {};
   try { TSEG = JSON.parse(localStorage.getItem('attrRadarSegs') || '{}'); } catch (e) {}
   const tableSegs = bw => { try { return bw && TSEG[bw.st] ? JSON.parse(TSEG[bw.st]) : null; } catch (e) { return null; } };
-  function resetLive() { S.quiet = 2; S.lastTop = null; S.lastTopProd = null; S.prodSums = null; S.colSums = null; S.lastTopCol = new Map(); S.hist = []; S.jump = null; }
+  // 1위 교체 확정: 새 1위가 이전 1위보다 3개 이상·3% 이상 앞서고 1분 동안 유지될 때만 (1~2개 차이 뒤집힘 무시)
+  const SW = new Map();
+  function swOK(slot, cand, val, oldVal) {
+    if (oldVal === null || oldVal === undefined || val - oldVal >= Math.max(3, oldVal * 0.03)) {
+      const c = SW.get(slot);
+      if (!c || c.k !== cand) { SW.set(slot, { k: cand, t: Date.now() }); return false; }
+      return Date.now() - c.t >= 60000;
+    }
+    SW.delete(slot); return false;
+  }
+  function resetLive() { SW.clear(); S.quiet = 2; S.lastTop = null; S.lastTopProd = null; S.prodSums = null; S.colSums = null; S.lastTopCol = new Map(); S.hist = []; S.jump = null; }
   function scan() {
     try { readConv(); } catch (e) {}
     const bwNow = broadcastWindow();
@@ -304,11 +314,11 @@
     checkEnd();
   }
 
-  // ---------- 회사 매진 기준 (생판종 주문수량관리: 주문가능(기본+추가) 소진율) ----------
+  // ---------- 당사 매진 기준 (생판종 주문수량관리: 주문가능(기본+추가) 소진율) ----------
   // 소진율 = (미리+방송 주문) / (미리+방송 주문 + 주문가능)
   const LV = [null, { n: 1, min: 70, name: '매진예상', icon: '🔵', cls: 'lv1' }, { n: 2, min: 80, name: '매진임박', icon: '🟡', cls: 'lv2' }, { n: 3, min: 95, name: '매진', icon: '🔴', cls: 'lv3' }];
   const lvOf = pct => (pct >= 95 ? 3 : pct >= 80 ? 2 : pct >= 70 ? 1 : 0);
-  const usePred = () => cfg.soldMode === '회사+예측';
+  const usePred = () => cfg.soldMode !== '당사'; // '예측'(기본): 예측으로 알리고 당사 단계는 매진현황으로 표시
   const metric = r => (cfg.metric === '총' ? (r.pre || 0) + (r.live || 0) : (r.live || 0));
 
   function snapshot() {
@@ -338,16 +348,28 @@
     return { list, mins };
   }
 
+  function nowScope() {
+    const now = Date.now(); let base = S.hist[0];
+    if (!base || now - base.t < 60000) return null; // 1분 이상 쌓이기 전엔 전체
+    for (const h of S.hist) { if (h.t <= now - 5 * 60000) base = h; else break; }
+    const act = new Set(), cur = S.hist[S.hist.length - 1];
+    S.rows.forEach((r, k) => { if (!inScope(r.prod)) return; const a = cur.vals[k], b = base.vals[k]; if (a && b && a.m > b.m) act.add(r.prod); });
+    if (!act.size) return null;
+    const segs = tableSegs(broadcastWindow());
+    if (segs) segs.forEach(g => { const ns = new Set(g.names); const inG = p => ns.has(norm(p.replace(/ \(\d+\)$/, ''))); if ([...act].some(inG)) S.rows.forEach(r => { if (inScope(r.prod) && inG(r.prod)) act.add(r.prod); }); });
+    return act;
+  }
+  const inView = p => cfg.ui.scope === 'all' || !S.nowSet || S.nowSet.has(p);
   function products() {
     const m = new Map();
-    S.rows.forEach(r => { if (!inScope(r.prod)) return; if (!m.has(r.prod)) m.set(r.prod, []); m.get(r.prod).push(r); });
+    S.rows.forEach(r => { if (!inScope(r.prod) || !inView(r.prod)) return; if (!m.has(r.prod)) m.set(r.prod, []); m.get(r.prod).push(r); });
     return [...m.entries()].map(([p, rs]) => ({ p, rs, sum: rs.reduce((s, r) => s + metric(r), 0) })).sort((a, b) => b.sum - a.sum);
   }
 
   function soldOut(rateMap, mins) {
     const out = [];
     S.rows.forEach(r => {
-      if (!live(r) || !inScope(r.prod)) return;
+      if (!live(r) || !inScope(r.prod) || !inView(r.prod)) return;
       const tot = (r.pre || 0) + (r.live || 0), avail = r.avail || 0;
       const pct = tot + avail > 0 ? tot / (tot + avail) * 100 : 0;
       const rate = rateMap.get(r.key) || 0;
@@ -361,7 +383,8 @@
   }
 
   function analyze() {
-    const D0 = deltas(), D = { ...D0, list: D0.list.filter(x => inScope(x.r.prod)) };
+    S.nowSet = nowScope();
+    const D0 = deltas(), D = { ...D0, list: D0.list.filter(x => inScope(x.r.prod) && inView(x.r.prod)) };
     const rateMap = new Map(D.list.map(x => [x.r.key, x.rate]));
     const P = products();
     const all = [...S.rows.values()].filter(r => live(r) && inScope(r.prod)).sort((a, b) => metric(b) - metric(a));
@@ -399,35 +422,57 @@
       const c0 = x.colors[0];
       if (x.colors.length > 1 && c0.sum > 0) {
         const prev = S.lastTopCol.get(x.p);
-        if (prev && prev !== c0.c) alert('🎨 컬러 1위 교체', `${shortP(x.p)} ${c0.c} (${fmt(c0.sum)})`, 'color', x.p);
-        S.lastTopCol.set(x.p, c0.c);
+        if (!prev) S.lastTopCol.set(x.p, c0.c);
+        else if (prev !== c0.c) {
+          const old = x.colors.find(o => o.c === prev);
+          if (swOK('c:' + x.p, c0.c, c0.sum, old ? old.sum : null)) { alert('🎨 컬러 1위 교체', `${shortP(x.p)} ${c0.c} (${fmt(c0.sum)})`, 'color', x.p); S.lastTopCol.set(x.p, c0.c); SW.delete('c:' + x.p); }
+        } else SW.delete('c:' + x.p);
       }
     });
     S.colSums = cs;
     S.view = { D, P, top, SO, rateMap };
     if (P.length > 1 && P[0].sum > 0) {
-      if (S.lastTopProd && S.lastTopProd !== P[0].p) alert('🏆 상품 1위 교체', `${shortP(P[0].p)} (${fmt(P[0].sum)})`, 'prod', P[0].p);
-      S.lastTopProd = P[0].p;
+      if (!S.lastTopProd) S.lastTopProd = P[0].p;
+      else if (S.lastTopProd !== P[0].p) {
+        const old = P.find(o => o.p === S.lastTopProd);
+        if (swOK('p', P[0].p, P[0].sum, old ? old.sum : null)) { alert('🏆 상품 1위 교체', `${shortP(P[0].p)} (${fmt(P[0].sum)})`, 'prod', P[0].p); S.lastTopProd = P[0].p; SW.delete('p'); }
+      } else SW.delete('p');
     }
 
     // 알림
     if (top && metric(top) > 0) {
-      if (S.lastTop && S.lastTop !== top.key) alert('🥇 1위 교체', `${short(top)} (${fmt(metric(top))})`, 'attr', top.prod);
-      S.lastTop = top.key;
+      if (!S.lastTop) S.lastTop = top.key;
+      else if (S.lastTop !== top.key) {
+        const old = S.rows.get(S.lastTop);
+        if (swOK('a', top.key, metric(top), old ? metric(old) : null)) { alert('🥇 1위 교체', `${short(top)} (${fmt(metric(top))})`, 'attr', top.prod); S.lastTop = top.key; SW.delete('a'); }
+      } else SW.delete('a');
     }
-    // 단계가 오를 때마다 한 번씩 (같은 단계는 다시 안 울림). 예측 기준은 회사 단계가 없을 때만 30분에 한 번
+    // 단계가 오를 때마다 한 번씩 (같은 단계는 다시 안 울림). 예측 기준은 당사 단계가 없을 때만 30분에 한 번
     SO.forEach(x => {
+      if (x.r.prod === '(상품 미확인)') return;
+      if (x.avail <= 0 && S.quiet > 0) { S.alerted.set('so:' + x.r.key + ':3', Date.now()); return; } // 켜기 전에 이미 매진
       const info = { k: x.r.key, pct: Math.round(x.pct), eta: x.eta !== null ? Math.ceil(x.eta) : null, avail: x.avail };
       const msg = `${short(x.r)} 소진율 ${Math.round(x.pct)}% · 잔여 ${fmt(x.avail)}${x.eta !== null ? ` · 약 ${Math.ceil(x.eta)}분` : ''}`;
-      if (x.lv) once('so:' + x.r.key + ':' + x.lv, 24 * 60, `${LV[x.lv].icon} ${LV[x.lv].name}`, msg, 'sold', x.r.prod, { ...info, lv: x.lv, why: 'pct' });
-      else once('so:' + x.r.key + ':p', 30, '⏱ 소진 예측', msg, 'sold', x.r.prod, { ...info, lv: 0, why: x.why.join('+') });
+      // 당사 단계: 예측 모드에선 매진현황 표시와 알림 탭 기록만, 팝업은 ⚙에서 켤 때만(type 'lv')
+      if (x.lv) once('so:' + x.r.key + ':' + x.lv, 24 * 60, `${LV[x.lv].icon} ${LV[x.lv].name}`, msg, usePred() ? 'lv' : 'sold', x.r.prod, { ...info, lv: x.lv, why: 'pct' });
+      // 예측: 속성마다 한 번 (매진 단계 전, 잔여가 있을 때)
+      if (usePred() && x.why.length && x.lv < 3 && x.avail > 0) once('so:' + x.r.key + ':p', 24 * 60, '⏱ 소진 예측', msg + (x.lv ? ` · 지금 ${LV[x.lv].icon}${LV[x.lv].name}` : ''), 'sold', x.r.prod, { ...info, lv: x.lv, why: x.why.join('+') });
     });
     const s = D.list.find(x => live(x.r));
     if (s && s.d >= cfg.surge) once('su:' + s.r.key, cfg.win, '🔥 급상승', `${short(s.r)} +${fmt(s.d)} / ${Math.max(1, Math.round(D.mins))}분`, 'surge', s.r.prod);
     render();
   }
 
-  const shortP = p => p.replace(/^SJ\s*WANI\s*/i, '');
+  const NCACHE = new Map();
+  const shortP = p => {
+    const ck = cfg.brand + '|' + p; if (NCACHE.has(ck)) return NCACHE.get(ck);
+    let q = String(p).replace(/\d{2}\s*(?:FW|SS|F\/W|S\/S)/gi, ' ').replace(/(^|[^A-Za-z])NEW(?![a-z])/g, '$1 ').replace(/\s+/g, ' ').trim();
+    if (cfg.brand) {
+      const m = /^((?:[가-힣A-Za-z]{1,2}\))?\s*)(.*)$/.exec(q), names = [cfg.brand, ...Object.entries({ ...ALIAS, ...cfg.alias }).filter(([, b]) => b === cfg.brand).map(([a]) => a)].sort((a, b) => b.length - a.length);
+      for (const n of names) { const re = new RegExp('^' + n.replace(/\s+/g, '').split('').map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*') + '\\s*', 'i'); if (re.test(m[2])) { const rest = m[2].replace(re, ''); if (rest) q = (m[1].trim() + rest).trim(); break; } }
+    }
+    NCACHE.set(ck, q); return q;
+  };
   const attrL = r => [r.color, r.size].filter(x => x && x !== '-').join(' ');
   const short = r => `${shortP(r.prod)} ${attrL(r)}`;
 
@@ -778,7 +823,7 @@
     const h = [];
     h.push(`<div class="btns" style="margin:0 0 6px"><button data-a="sumcopy">리뷰 텍스트 복사</button><button data-a="report">리포트 저장</button>${DIR.ok ? '<button data-a="save">폴더에 저장</button>' : ''}</div>`);
     h.push(`<div class="muted">${esc(title(m))} · ${cfg.metric}주문 합계 ${fmt(m.total)}개</div>`);
-    notes(m).forEach(t => h.push(`<div class="muted" style="color:#bc4c00">※ ${esc(t)}</div>`));
+    const nt = notes(m); if (nt.length) h.push(`<details class="note1"><summary>⚠ 안내 ${nt.length}건 (전환율·기록 시간)</summary>${nt.map(t => `<div>※ ${esc(t)}</div>`).join('')}</details>`);
     h.push(`<div class="jmp">${[['A', '판매·소진'], ['B', '구간'], ['C', '비중'], ['D', '품절'], ['E', '액션']].filter(([k]) => k !== 'B' || m.segs.length).map(([k, l]) => `<button data-j="${k}">${k} ${l}</button>`).join('')}</div>`);
     h.push(`<h5 id="sA">A. 상품별 판매와 소진</h5>`);
     m.prods.forEach(x => h.push(`<div class="prod"><h4><span>${esc(nm(x.p))}</span><span>${fmt(x.sum)} <span class="muted">판매비중 ${Math.round(x.pct)}%</span></span></h4>${bar(x.est !== null ? x.est : x.st)}${x.conv !== null ? `<div class="muted">준비 ${fmt(x.supply)} · 총주문 ${fmt(x.ord)} × 전환 ${Math.round(x.conv * 100)}% = 예상취급 <b>${fmt(x.exq)}</b></div><div class="muted">예상소진 <b>${Math.round(x.est)}%</b> · 총주문 기준 소진 ${Math.round(x.st)}% · 잔여 ${fmt(x.avail)}${x.seg ? ` · ${x.seg}구간` : ''}</div>` : `<div class="muted">준비 ${fmt(x.supply)} · 잔여 ${fmt(x.avail)} · 총주문 기준 소진 ${Math.round(x.st)}% · 전환율 미확인${x.seg ? ` · ${x.seg}구간` : ''}</div>`}</div>`));
@@ -908,9 +953,9 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<style>
     :host{all:initial}
-    .p{width:360px;max-height:70vh;position:relative;display:flex;flex-direction:column;background:#fff;color:#1f2328;border:1px solid #d0d7de;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.18);font:13px/1.45 'Pretendard Variable',Pretendard,'Malgun Gothic','Apple SD Gothic Neo',sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';overflow:hidden}
+    .p{width:400px;max-height:70vh;position:relative;display:flex;flex-direction:column;background:#fff;color:#1f2328;border:1px solid #d0d7de;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.18);font:13px/1.45 'Pretendard Variable',Pretendard,'Malgun Gothic','Apple SD Gothic Neo',sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';overflow:hidden}
     .hd{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#0088ff;color:#fff;cursor:move;user-select:none}
-    .hd b{font-size:14px}.hd .meta{font-size:11px;opacity:.9;flex:1}
+    .hd b{font-size:14px}.hd .meta{font-size:11px;opacity:.9;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .hd button{background:rgba(255,255,255,.2);border:0;color:#fff;border-radius:6px;padding:2px 7px;cursor:pointer;font-size:12px}
     .sum{padding:7px 12px;background:#eef7ff;border-bottom:1px solid #cfe6ff;font-weight:600}.sum .ln{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.more{color:#0088ff;font-size:11px;font-weight:400;cursor:pointer;background:none;border:0;padding:0;font-family:inherit}
     .st{padding:4px 12px;font-size:11px;color:#424a53;background:#f6f8fa;border-bottom:1px solid #eaeef2}.st .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#1a9e6e;margin-right:5px}
@@ -922,7 +967,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .cv{font-size:10px;background:#e6f2ff;color:#0062b8;border-radius:4px;padding:0 4px;margin-left:4px;font-weight:400}.cv.no{background:#fff1d6;color:#9a5b00}
     .jmp{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 6px}.jmp button{border:1px solid #cfe6ff;background:#f3f9ff;color:#0062b8;border-radius:12px;padding:1px 8px;font:inherit;font-size:11px;font-weight:600;cursor:pointer}
     .sw{display:flex;justify-content:space-between;align-items:center;margin:4px 0}
-    .tabs{display:flex;border-bottom:1px solid #eee}.tabs button{flex:1 0 auto;white-space:nowrap;border:0;background:none;padding:7px 6px;cursor:pointer;font:inherit;font-size:12px;color:#57606a}
+    .tabs{display:flex;border-bottom:1px solid #eee}.tabs button{flex:1 0 auto;white-space:nowrap;border:0;background:none;padding:7px 4px;cursor:pointer;font:inherit;font-size:12px;color:#57606a}
     .tabs .sep{flex:0 0 1px;background:#e4e4e4;margin:7px 2px}.bdg:not(:empty){display:inline-block;margin-left:3px;min-width:15px;padding:0 4px;border-radius:8px;background:#0088ff;color:#fff;font-size:10px;line-height:15px;font-weight:700}
     .tabs button.on{color:#0088ff;font-weight:700;box-shadow:inset 0 -2px #0088ff}
     .bd{overflow:auto;padding:8px 12px}
@@ -944,12 +989,26 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .t{background:#1f2328;color:#fff;border-radius:8px;padding:8px 12px;width:330px;box-shadow:0 4px 14px rgba(0,0,0,.25);animation:f .25s}
     @keyframes f{from{opacity:0;transform:translateY(6px)}}
     .min .tabs,.min .bd,.min .grip,.min .st,.min .band{display:none}
-    .p.wide{width:540px}
+    .min .sum .x,.min .sum .more{display:none}
+    .st[hidden]{display:none}
+    .wgrip{position:absolute;left:0;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:3}.wgrip:hover{background:rgba(0,136,255,.18)}
+    .scope{display:flex;align-items:center;gap:8px;margin-bottom:6px}.scope .seg{margin:0}
+    .g{display:grid;grid-template-columns:minmax(0,1fr) 50px 44px 50px 66px;gap:4px;align-items:center;padding:2px 0}.g>*:not(:first-child){text-align:right}
+    .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.nm2{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:-1px 0 3px}
+    .num{font-variant-numeric:tabular-nums}.lvc{white-space:nowrap}
+    .prod2{margin:2px 0 8px}.pn{display:flex;justify-content:space-between;gap:6px;font-weight:700}.pn .nm{flex:1}
+    .ptitle{display:flex;justify-content:space-between;gap:8px;font-weight:700;margin:8px 0 2px}
+    table.mx{table-layout:fixed;font-size:12px;margin:2px 0 4px}table.mx th,table.mx td{border:1px solid #eaeef2;padding:2px;text-align:center;font-variant-numeric:tabular-nums}table.mx th{background:#fafbfc;font-weight:600;color:#57606a;font-size:11px}table.mx tr th:first-child{width:68px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    table.mx td small{display:block;color:#d1242f;font-size:10px;line-height:1}table.mx td.tot{background:#fafbfc}
+    td.m1{background:#cfe3ff}td.m2{background:#ffe680}td.m3{background:#ff3b30;color:#fff}td.m3 small{color:#fff}td.mp{box-shadow:inset 0 0 0 2px #8250df}
+    .sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px;border:1px solid #d0d7de}.sw.m0{background:rgba(0,136,255,.45)}.sw.m1{background:#cfe3ff}.sw.m2{background:#ffe680}.sw.m3{background:#ff3b30}.sw.mp{box-shadow:inset 0 0 0 2px #8250df;background:#fff}
+    .note1{background:#fff8e6;border:1px solid #f5d48a;color:#7a4d00;border-radius:6px;padding:4px 8px;font-size:12px;margin:4px 0}.note1 summary{font-weight:600;font-size:12px}
+    .bdg.red:not(:empty){background:#ff3b30}
     .seg{display:inline-flex;border:1px solid #d0d7de;border-radius:6px;overflow:hidden;margin:0 6px 6px 0}.seg button{border:0;background:#fff;padding:3px 8px;cursor:pointer;font:inherit;font-size:12px;color:#57606a}.seg button.on{background:#0088ff;color:#fff}
     .lg{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;margin-top:4px}.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
     svg text{font:11px 'Pretendard Variable',Pretendard,'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#6e7781}
   </style><div class="toasts"></div><div class="p"><div class="hd"><b>속성 레이더</b><span class="meta"></span><button data-a="brand" class="bb" title="브랜드 고르기"></button><button data-a="quiet" title="조용히 모드"></button><button data-a="min" title="줄이기">_</button><button data-a="close" title="종료">×</button></div>
-  <div class="st"></div><div class="bands"></div><div class="sum"></div><div class="tabs">${TAB_GROUPS.map(g => g.map(([k, l]) => `<button data-t="${k}">${l}<span class="bdg" data-b="${k}"></span></button>`).join('')).join('<i class="sep"></i>')}</div><div class="bd"></div><div class="grip" title="끌어서 높이 조절">═══</div><div class="menu" hidden></div></div>`;
+  <div class="st"></div><div class="bands"></div><div class="sum"></div><div class="tabs">${TAB_GROUPS.map(g => g.map(([k, l]) => `<button data-t="${k}">${l}<span class="bdg${k === 'sold' ? ' red' : ''}" data-b="${k}"></span></button>`).join('')).join('<i class="sep"></i>')}</div><div class="bd"></div><div class="grip" title="끌어서 높이 조절">═══</div><div class="wgrip" title="끌어서 폭 조절"></div><div class="menu" hidden></div></div>`;
   const $ = s => root.querySelector(s);
 
   function toast(title, msg) {
@@ -976,11 +1035,15 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     return `<div class="band ok"><button class="x" data-a="verx" title="닫기">✕</button>✔ 새 버전 v${VER}으로 열렸어요. 바뀐 점: ${esc(CHANGES)}</div>`;
   }
   function statusHtml() {
-    const bw = broadcastWindow(), ft = bw ? firstRecT(bw) : null;
     const prods = [...new Set([...S.rows.values()].map(r => r.prod))], inP = prods.filter(inPgm), mine = inP.filter(inBrand), other = prods.length - inP.length;
-    const cv = mine.filter(p => CONV[norm(p)]).length;
-    return `<span class="dot"></span>${ft ? `${hhmmss(ft).slice(0, 5)}부터 기록 중` : '기록 중'}${bw ? ` · 방송 ${bw.label}` : ''}${mine.length ? ` · 전환율 ${cv}/${mine.length}` : ''}${cfg.brand ? `<br>${esc(bName(cfg.brand))}만 보는 중 · 다른 상품 ${inP.length - mine.length}개 숨김` : ''}${other ? `<br>${inP.length ? `다른 방송 상품 ${other}개는 숨겼어요` : '이 방송일시의 표를 아직 못 읽었어요. 조회를 누르면 보여요'}` : ''}`;
+    return [cfg.brand && `${esc(bName(cfg.brand))}만 보는 중 · 다른 상품 ${inP.length - mine.length}개 숨김`, other && (inP.length ? `다른 방송 상품 ${other}개는 숨겼어요` : '이 방송일시의 표를 아직 못 읽었어요. 조회를 누르면 보여요')].filter(Boolean).join('<br>');
   }
+  function statusShort() {
+    const bw = broadcastWindow(), ft = bw ? firstRecT(bw) : null;
+    const mine = [...new Set([...S.rows.values()].map(r => r.prod))].filter(inPgm).filter(inBrand), cv = mine.filter(p => CONV[norm(p)]).length;
+    return `${ft ? hhmmss(ft).slice(0, 5) + '부터 ' : ''}기록 중${mine.length ? ` · 전환율 ${cv}/${mine.length}` : ''}`;
+  }
+
   function menuHtml() {
     const cnt = new Map();
     [...new Set([...S.rows.values(), ...S.parked.values()].map(r => r.prod))].filter(inPgm).forEach(p => { const b = brandOf(p); cnt.set(b, (cnt.get(b) || 0) + 1); });
@@ -994,13 +1057,13 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
   function render() {
     const v = S.view;
     const nFold = [...S.rows.values()].filter(r => isAgg(r) && inScope(r.prod)).length;
-    $('.meta').textContent = S.lastScan ? `${hhmmss(S.lastScan)}${nFold ? ` · 접힌 상품 ${nFold}` : ''}` : '대기 중';
+    $('.meta').innerHTML = S.lastScan ? `${hhmmss(S.lastScan)} · ${statusShort()}${nFold ? ` · 접힘 ${nFold}` : ''}` : '대기 중';
     $('[data-a=brand]').textContent = (cfg.brand ? bName(cfg.brand).replace(' (목록에 없음)', '') : '전체') + ' ▾';
     $('[data-a=quiet]').textContent = cfg.quietMode ? '🔕 조용히' : '🔔';
     $('[data-a=quiet]').title = cfg.quietMode ? '조용히 모드 끄기 (팝업 다시 보기)' : '조용히 모드 (팝업 없이 배지·알림 탭에만)';
     if (!$('.menu').hidden) $('.menu').innerHTML = menuHtml();
     root.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === S.tab));
-    $('.st').innerHTML = statusHtml();
+    const stx = statusHtml(); $('.st').innerHTML = stx; $('.st').hidden = !stx;
     $('.bands').innerHTML = verBand() + bandsHtml();
     if (!S.rows.size || !v || !v.P.length) {
       $('.sum').textContent = S.rows.size ? `${bName(cfg.brand)} 상품이 지금 표에 없어요. 브랜드 버튼에서 바꿀 수 있어요.` : '주문수량관리 표를 화면에 띄워주세요';
@@ -1013,15 +1076,16 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     setB('sold', v.SO.length); setB('surge', v.D.list.filter(x => live(x.r) && x.d >= cfg.surge).length);
     // 위 요약: 컬러 1위·급상승 2줄, 나머지는 더보기
     const cTop = v.P.flatMap(x => (x.colors || []).slice(0, 1).map(o => ({ x, o }))).sort((a, b) => b.o.sum - a.o.sum)[0];
-    const l1 = cTop ? `🎨 컬러 1위 ${esc(shortP(cTop.x.p))} <b>${esc(cTop.o.c)}</b> <span class="muted">${fmt(cTop.o.sum)}개</span>${cTop.o.jd ? ` <span class="up">${sg(cTop.o.jd)}</span>` : ''}` : `🏆 상품 1위 ${esc(shortP(tp.p))} <span class="muted">${fmt(tp.sum)}개</span>${tp.jd ? ` <span class="up">${sg(tp.jd)}</span>` : ''}`;
-    const l2 = s ? `🔥 급상승 ${esc(short(s.r))} <span class="up">+${fmt(s.d)}</span><span class="muted"> / ${v.D.mins < 1 ? '1분 미만' : Math.round(v.D.mins) + '분'}</span>` : `🔥 급상승 <span class="muted">기록이 ${cfg.win}분 쌓이면 보여요</span>`;
+    const lvN = n => v.SO.filter(x => x.lv === n).length, lvTxt = [3, 2, 1].filter(n => lvN(n)).map(n => `<i class="lvb ${LV[n].cls}">${LV[n].icon}${lvN(n)}</i>`).join(' ');
+    const l0 = cTop ? `🎨 컬러 1위 ${esc(shortP(cTop.x.p))} <b>${esc(cTop.o.c)}</b> <span class="muted">${fmt(cTop.o.sum)}개</span>${cTop.o.jd ? ` <span class="up">${sg(cTop.o.jd)}</span>` : ''}` : `🏆 상품 1위 ${esc(shortP(tp.p))} <span class="muted">${fmt(tp.sum)}개</span>${tp.jd ? ` <span class="up">${sg(tp.jd)}</span>` : ''}`;
+    const l1 = s ? `🔥 ${cfg.ui.scope === 'all' ? '' : '지금 구간 '}급상승 ${esc(short(s.r))} <span class="up">+${fmt(s.d)}</span><span class="muted"> / ${v.D.mins < 1 ? '1분 미만' : Math.round(v.D.mins) + '분'}</span>` : `🔥 급상승 <span class="muted">기록이 ${cfg.win}분 쌓이면 보여요</span>`;
     const jl = S.jump ? S.jump.list.filter(r => r.jd > 0 && inScope(r.prod)) : [];
-    const rest = [cTop && `🏆 상품 1위 ${esc(shortP(tp.p))} <span class="muted">${fmt(tp.sum)}개</span>${tp.jd ? ` <span class="up">${sg(tp.jd)}</span>` : ''}`,
+    const l2 = `🚦 매진현황 ${lvTxt || '<span class="muted">없음</span>'}${usePred() ? ` · ⏱ 예측 ${v.SO.filter(x => !x.lv && x.why.length).length}` : ''}`;
+    const rest = [l0, cTop && `🏆 상품 1위 ${esc(shortP(tp.p))} <span class="muted">${fmt(tp.sum)}개</span>${tp.jd ? ` <span class="up">${sg(tp.jd)}</span>` : ''}`,
       top ? `🥇 속성 1위 ${esc(short(top))} <span class="muted">${fmt(metric(top))}개</span>` : '🥇 속성 1위 <span class="muted">상품이 모두 접혀 있음</span>',
       jl.length && `⏱️ 직전 대비(${hhmmss(S.jump.t)}) <span class="up">${sg(jl.reduce((a, r) => a + r.jd, 0))}</span> <span class="muted">${jl.slice(0, 3).map(r => esc(`${attrL(r)} ${sg(r.jd)}`)).join(' · ')}</span>`,
-      v.SO.length && `⚠️ 품절임박 ${v.SO.length}개 (${[3, 2, 1].map(n => [n, v.SO.filter(x => x.lv === n).length]).filter(a => a[1]).map(([n, c]) => LV[n].icon + c).join(' ') || '예측'})`].filter(Boolean);
-    $('.sum').innerHTML = `<div class="ln">${l1}</div><div class="ln">${l2}</div>` + (cfg.sumOpen ? rest.map(x => `<div class="ln">${x}</div>`).join('') + '<button class="more" data-a="more">접기 ▴</button>' : `<button class="more" data-a="more">더보기 ▾ (상품 1위 · 속성 1위 · 직전 대비${v.SO.length ? ` · 품절임박 ${v.SO.length}` : ''})</button>`);
-    $('.p').classList.toggle('wide', S.tab === 'graph');
+    ].filter(Boolean);
+    $('.sum').innerHTML = `<div class="ln">${l1}</div><div class="ln">${l2}</div>` + (cfg.sumOpen ? rest.map(x => `<div class="ln x">${x}</div>`).join('') + '<button class="more" data-a="more">접기 ▴</button>' : `<button class="more" data-a="more">더보기 ▾ (컬러·상품·속성 1위 · 직전 대비)</button>`);
     // 탭이 한 줄에 다 들어가도록 패널 너비 자동 조정
     const tabs = $('.tabs'); $('.p').style.minWidth = '';
     if (tabs.scrollWidth > tabs.clientWidth) $('.p').style.minWidth = (tabs.scrollWidth + 2) + 'px';
@@ -1029,48 +1093,68 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     const st = $('.bd').scrollTop; $('.bd').innerHTML = body; $('.bd').scrollTop = st;
   }
 
+
+  // ---------- 공통 칸: 이름 | 판매 | 최근 | 잔여 | 매진현황 ----------
+  const lvBadge = n => `<i class="lvb ${LV[n].cls}">${LV[n].name}</i>`;
+  const soMap = () => new Map(S.view.SO.map(x => [x.r.key, x]));
+  const lvCount = (rs, sm) => { const c = [3, 2, 1].map(n => [n, rs.filter(r => (sm.get(r.key) || {}).lv === n).length]).filter(a => a[1]); const pr = rs.filter(r => { const x = sm.get(r.key); return x && !x.lv && x.why.length; }).length; return c.map(([n, k]) => `<i class="lvb ${LV[n].cls}">${LV[n].icon}${k}</i>`).join('') + (pr ? `<i class="lvb lv0">⏱${pr}</i>` : '') || '<span class="muted">-</span>'; };
+  const lvOne = x => (!x ? '<span class="muted">-</span>' : x.lv ? lvBadge(x.lv) : '<i class="lvb lv0">⏱예측</i>');
+  const wLab = () => { const m = S.view.D.mins; return m < 1 ? '1분' : Math.round(m) + '분'; };
+  const scopeBar = () => { const all = cfg.ui.scope === 'all', n = S.nowSet ? S.nowSet.size : 0;
+    return `<div class="scope"><span class="seg"><button data-sc="now" class="${all ? '' : 'on'}">지금 구간</button><button data-sc="all" class="${all ? 'on' : ''}">방송 전체</button></span><span class="muted" title="지금 구간 = 최근 5분 안에 판매가 늘어난 상품 + 방송실적관리에서 같은 노출분(같은 구간)으로 묶인 상품. 기록이 1분 이상 쌓이기 전이나 판매가 없으면 전체를 보여요.">${all ? '방송 전체' : S.nowSet ? `상품 ${n}개 · 기준 ⓘ` : '기록이 쌓이면 구간을 찾아요 ⓘ'}</span></div>`; };
+  const colHd = (a = '이름') => `<div class="g colhd"><span>${a}</span><span>판매</span><span>${wLab()}</span><span>잔여</span><span>매진현황</span></div>`;
+  const gRow = (name, v, d, a, lv, title, cls = '') => `<div class="g ${cls}"><span class="nm" title="${esc(title || '')}">${name}</span><b class="num">${fmt(v)}</b><span class="num ${d ? 'up' : 'muted'}">${d ? '+' + fmt(d) : '0'}</span><span class="num muted">${fmt(a)}</span><span class="lvc">${lv}</span></div>`;
+  const dMap = () => new Map(S.view.D.list.map(x => [x.r.key, x.d]));
+  const pfx = (c, z) => [c, z].filter(v => v && v !== '-').join(' ');
   function topHtml() {
-    const { P } = S.view, total = P.reduce((s, x) => s + x.sum, 0) || 1;
-    return `<p class="muted" style="margin:0 0 6px">빨간 +숫자 = 직전 갱신 대비 더 나간 수량</p>` + P.map(({ p, rs, sum }) => {
-      const lr = rs.filter(live);
-      if (!lr.length) return `<div class="prod"><h4><span>${esc(p)}</span><span>${fmt(sum)} <span class="muted">${Math.round(sum / total * 100)}%</span></span></h4><div class="muted">접혀 있어 상품 합계만 추적 중이에요. 펼치면 속성별로 보여요.</div></div>`;
-      const sorted = [...lr].sort((a, b) => metric(b) - metric(a)), mx = metric(sorted[0]) || 1;
-      const by = f => { const m = {}; lr.forEach(r => m[r[f]] = (m[r[f]] || 0) + metric(r)); return Object.entries(m).sort((a, b) => b[1] - a[1])[0]; };
-      const bc = by('color'), bs = by('size');
-      return `<div class="prod"><h4><span>${esc(p)}</span><span>${fmt(sum)} <span class="muted">${Math.round(sum / total * 100)}%</span></span></h4>
-        <div class="muted">베스트 컬러 <b>${esc(bc[0])}</b> ${fmt(bc[1])} · 베스트 사이즈 <b>${esc(bs[0])}</b> ${fmt(bs[1])}</div>
-        ${sorted.slice(0, 5).map(r => `<div class="row"><span>${esc(attrL(r))}<div class="bar"><i style="width:${metric(r) / mx * 100}%"></i></div></span><b>${fmt(metric(r))}</b><span class="muted">${v_d(r)}</span></div>`).join('')}</div>`;
-    }).join('');
+    const { P } = S.view, sm = soMap(), dm = dMap();
+    const sizeSort = (a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || String(a).localeCompare(b);
+    return scopeBar() + P.map(x => {
+      const lr = x.rs.filter(live);
+      const hd = `<div class="ptitle"><span class="nm" title="${esc(x.p)}">${esc(shortP(x.p))}</span><span class="num">${fmt(x.sum)}${x.win ? ` <span class="up">+${fmt(x.win)}</span>` : ''}</span></div>`;
+      if (!lr.length) return hd + '<div class="muted">접혀 있어 상품 합계만 추적 중이에요. 펼치면 속성별로 보여요.</div>';
+      const sizes = [...new Set(lr.map(r => r.size))].sort(sizeSort), cs = {};
+      lr.forEach(r => { cs[r.color] = (cs[r.color] || 0) + metric(r); });
+      const colors = Object.keys(cs).sort((a, b) => cs[b] - cs[a]), mx = Math.max(1, ...lr.map(metric));
+      const cell = (c, z) => {
+        const r = lr.find(r => r.color === c && r.size === z);
+        if (!r) return '<td class="muted">·</td>';
+        const o = sm.get(r.key), d = dm.get(r.key) || 0, tot = (r.pre || 0) + (r.live || 0), pct = tot + (r.avail || 0) > 0 ? Math.round(tot / (tot + (r.avail || 0)) * 100) : 0;
+        const cls = o && o.lv ? 'm' + o.lv : o ? 'mp' : '', bg = o && o.lv ? '' : `background:rgba(0,136,255,${(0.05 + 0.5 * metric(r) / mx).toFixed(2)})`;
+        return `<td class="${cls}" style="${bg}" title="${esc(pfx(c, z))} · 판매 ${fmt(metric(r))} · 최근 ${wLab()} +${fmt(d)} · 잔여 ${fmt(r.avail || 0)} · 소진 ${pct}%${o ? ' · ' + (o.lv ? LV[o.lv].name : '소진 예측' + (o.eta !== null ? ' 약 ' + Math.ceil(o.eta) + '분' : '')) : ''}"><b>${fmt(metric(r))}</b>${d ? `<small>+${fmt(d)}</small>` : ''}</td>`;
+      };
+      const showTot = sizes.length > 1;
+      return hd + `<table class="mx"><tr><th></th>${sizes.map(z => `<th>${z === '-' ? '' : esc(z)}</th>`).join('')}${showTot ? '<th>합</th>' : ''}</tr>${colors.map(c => `<tr><th title="${esc(c === '-' ? '' : c)}">${c === '-' ? '' : esc(c)}</th>${sizes.map(z => cell(c, z)).join('')}${showTot ? `<td class="tot"><b>${fmt(cs[c])}</b></td>` : ''}</tr>`).join('')}</table>`;
+    }).join('') + `<div class="lg"><span><i class="sw m0"></i>많이 팔릴수록 진함</span><span><i class="sw m1"></i>매진예상</span><span><i class="sw m2"></i>매진임박</span><span><i class="sw m3"></i>매진</span>${usePred() ? '<span><i class="sw mp"></i>소진 예측</span>' : ''}<span>작은 빨간 수 = 최근 ${wLab()}</span></div>`;
   }
+
   const sg = n => (n > 0 ? '+' : '') + fmt(n);
   const v_d = r => (r.jd ? `<span class="up" title="직전 갱신 대비">${sg(r.jd)}</span>` : '');
 
   function prodHtml() {
-    const { P } = S.view, total = P.reduce((a, x) => a + x.sum, 0) || 1, mx = P[0].sum || 1;
-    return `<p class="muted" style="margin:0 0 6px">${cfg.metric}주문 합계순 · 빨간 +숫자 = 직전 갱신 대비</p>` + P.map((x, i) => {
+    const { P } = S.view, mx = P[0].sum || 1, sm = soMap();
+    return scopeBar() + colHd() + P.map((x, i) => {
       const t = [...x.rs].filter(live).sort((a, b) => metric(b) - metric(a))[0];
-      const cv = CONV[norm(x.p.replace(/ \(\d+\)$/, ''))];
-      return `<div class="prod"><h4><span>${i + 1}. ${esc(shortP(x.p))}${cv ? `<span class="cv" title="예상전환율 (방송실적관리 예상취급액÷총주문액)">전환 ${Math.round(cv.r * 100)}%</span>` : '<span class="cv no" title="방송실적관리 표가 보이면 읽어요">전환율 미확인</span>'}</span><span>${fmt(x.sum)} ${x.jd ? `<span class="up">${sg(x.jd)}</span>` : ''}</span></h4>
-        <div class="bar"><i style="width:${x.sum / mx * 100}%"></i></div>
-        <div class="muted" style="margin-top:3px">비중 ${Math.round(x.sum / total * 100)}% · 최근 ${S.view.D.mins < 1 ? '1분 미만' : Math.round(S.view.D.mins) + '분'} <span class="${x.win ? 'up' : ''}">+${fmt(x.win)}</span>${x.rate && S.view.D.mins >= 1 ? ` (${x.rate.toFixed(1)}/분)` : ''} · 잔여 ${fmt(x.avail)} · 소진 ${Math.round(x.pct)}%</div>
-        <div class="muted">${t ? `1위 속성 <b>${esc(attrL(t))}</b> ${fmt(metric(t))}` : '접혀 있음 · 상품 합계만 추적 중'}</div></div>`;
+      return `<div class="prod2"><div class="pn"><span class="nm" title="${esc(x.p)}">${i + 1}. ${esc(shortP(x.p))}</span><span>${lvCount(x.rs.filter(live), sm)}</span></div>
+        <div class="g"><span><div class="bar"><i style="width:${x.sum / mx * 100}%"></i></div><span class="muted">${t ? `1위 <b>${esc(attrL(t))}</b> · ` : ''}소진 ${Math.round(x.pct)}%</span></span><b class="num">${fmt(x.sum)}</b><span class="num ${x.win ? 'up' : 'muted'}">${x.win ? '+' + fmt(x.win) : '0'}</span><span class="num muted">${fmt(x.avail)}</span><span></span></div></div>`;
     }).join('');
   }
 
+
   function colorHtml() {
-    const { P } = S.view, L = P.filter(x => x.colors && x.colors.length);
-    if (!L.length) return `<p class="muted">컬러 속성이 있는 상품이 없어요. (사이즈만 있는 상품은 제외)</p>`;
-    const mins = S.view.D.mins;
-    const w = mins < 1 ? '1분' : Math.round(mins) + '분';
-    return `<p class="muted" style="margin:0 0 4px">상품별 컬러 ${cfg.metric}주문 합계순 · 👑 = 상품 안 1위</p>
-      <div class="crow colhd"><span>컬러</span><span>판매</span><span>비중</span><span>직전</span><span>${w}</span><span>잔여</span></div>` + L.map(x => {
-      const mx = x.colors[0].sum || 1, tot = x.colors.reduce((a, o) => a + o.sum, 0) || 1;
-      const hot = [...x.colors].sort((a, b) => b.win - a.win)[0];
-      return `<div class="prod"><h4><span>${esc(shortP(x.p))}</span><span>${fmt(x.sum)}</span></h4>
-        ${x.colors.map((o, i) => `<div class="crow"><span>${i === 0 ? '👑 ' : ''}<b>${esc(o.c)}</b><div class="bar"><i style="width:${o.sum / mx * 100}%"></i></div></span><b>${fmt(o.sum)}</b><span class="muted">${Math.round(o.sum / tot * 100)}%</span><span class="${o.jd ? 'up' : 'muted'}">${o.jd ? sg(o.jd) : ''}</span><span class="${o.win ? 'up' : 'muted'}">+${fmt(o.win)}</span><span class="muted">${fmt(o.avail)}</span></div>`).join('')}
-        ${hot && hot.win > 0 && hot !== x.colors[0] ? `<div class="muted">🔥 지금 반응은 <b>${esc(hot.c)}</b>가 가장 빨라요 (+${fmt(hot.win)})</div>` : ''}</div>`;
-    }).join('') + `<p class="muted">판매 = ${cfg.metric}주문 누적 · 비중 = 상품 안 비중 · 직전 = 마지막 갱신 때 늘어난 수 · ${w} = 최근 ${w} 동안 늘어난 수 · 잔여 = 주문가능</p>`;
+    const { P } = S.view, sm = soMap(), dm = dMap();
+    return scopeBar() + colHd('컬러') + P.map(x => {
+      const lr = x.rs.filter(live); if (!lr.length) return '';
+      const noColor = lr.every(r => r.color === '-'), key = r => (noColor ? r.size : r.color), g = new Map();
+      lr.forEach(r => { const k = key(r); if (!g.has(k)) g.set(k, []); g.get(k).push(r); });
+      const L = [...g.entries()].map(([k, rs]) => ({ k, rs, v: rs.reduce((a, r) => a + metric(r), 0), d: rs.reduce((a, r) => a + (dm.get(r.key) || 0), 0), a: rs.reduce((a, r) => a + (r.avail || 0), 0) }));
+      if (noColor) L.sort((a, b) => (parseFloat(a.k) || 0) - (parseFloat(b.k) || 0)); else L.sort((a, b) => b.v - a.v);
+      const top = noColor ? null : L[0], hot = [...L].sort((a, b) => b.d - a.d)[0];
+      return `<div class="ptitle"><span class="nm" title="${esc(x.p)}">${esc(shortP(x.p))}</span><span class="num">${fmt(x.sum)}</span></div>` + L.map(o => gRow(`${o === top ? '👑 ' : ''}${esc(o.k === '-' ? '전체' : o.k)}`, o.v, o.d, o.a, lvCount(o.rs, sm), o.k)).join('') +
+        (hot && hot.d > 0 && hot !== L[0] && !noColor ? `<div class="muted">🔥 지금 반응은 <b>${esc(hot.k)}</b>가 가장 빨라요 (+${fmt(hot.d)})</div>` : '');
+    }).join('') + `<p class="muted">판매 = ${cfg.metric}주문 누적 · ${wLab()} = 최근 ${wLab()} 증가 · 잔여 = 주문가능 · 👑 = 상품 안 1위</p>`;
   }
+
 
   // 급상승: 최근 N분 동안 늘어난 양 순위. 상품 / 컬러 / 속성 단위 선택
   function surgeHtml() {
@@ -1083,17 +1167,17 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     L.sort((a, b) => b.d - a.d);
     const head = `${seg}<p class="muted" style="margin:0 0 6px">최근 ${D.mins < 1 ? '1분 미만' : Math.round(D.mins) + '분'} 동안 늘어난 ${cfg.metric}주문 순 (누적 순위는 상품·컬러·속성 탭)</p>`;
     if (!L.length) return head + `<p class="muted">최근 ${cfg.win}분 사이 늘어난 ${lv === 'prod' ? '상품' : lv === 'color' ? '컬러' : '속성'}이 아직 없어요. (기록 ${S.hist.length}회)</p>`;
-    return head + `<div class="row colhd"><span>${lv === 'prod' ? '상품' : lv === 'color' ? '상품 · 컬러' : '상품 · 속성'}</span><span style="text-align:right">${Math.max(1, Math.round(D.mins))}분 증가</span><span>분당</span></div>` + L.slice(0, 10).map((x, i) => `<div class="row"><span>${i + 1}. ${esc(x.n)}</span><b class="up">+${fmt(x.d)}</b><span class="muted">${D.mins >= 1 ? x.rate.toFixed(1) + '/분' : ''}</span></div>`).join('');
+    return head + `<div class="row colhd"><span>${lv === 'prod' ? '상품' : lv === 'color' ? '상품 · 컬러' : '상품 · 속성'}</span><span style="text-align:right">${Math.max(1, Math.round(D.mins))}분 증가</span><span>분당</span></div>` + L.slice(0, 10).map((x, i) => `<div class="row"><span class="nm" title="${esc(x.n)}">${i + 1}. ${esc(x.n)}</span><b class="up">+${fmt(x.d)}</b><span class="muted">${D.mins >= 1 ? x.rate.toFixed(1) + '/분' : ''}</span></div>`).join('');
   }
 
   function soldHtml() {
     const { SO } = S.view;
-    const rule = `회사 기준: 소진율 70% 매진예상 · 80% 매진임박 · 95% 매진${usePred() ? ` + 예측: 잔여 ${cfg.soldQty}개 이하 또는 ${cfg.soldEta}분 내 소진 예상` : ''}`;
-    if (!SO.length) return `<p class="muted">품절임박 속성 없음 (${rule})</p>`;
-    const tag = x => (x.lv ? `<i class="lvb ${LV[x.lv].cls}">${LV[x.lv].name}</i>` : '<i class="lvb lv0">예측</i>');
-    return `<div class="row colhd"><span>상품 · 속성</span><span>잔여</span><span>단계 · 소진율 · 남은 시간</span></div>` + SO.map(x => `<div class="row"><span>${esc(short(x.r))}</span><b class="warn">${fmt(x.avail)}</b><span class="muted">${tag(x)} ${Math.round(x.pct)}%${x.eta !== null ? ` · ${Math.ceil(x.eta)}분` : ''}</span></div>`).join('') +
-      `<p class="muted">${rule}<br>잔여 = 주문가능 · % = 소진율 = 주문(미리+방송) ÷ (주문 + 주문가능) · 분 = 현재 속도면 남은 시간</p>`;
+    const rule = usePred() ? `알림: 현재 속도로 ${cfg.soldEta}분 내 소진 예상 또는 잔여 ${cfg.soldQty}개 이하 · 매진현황: 당사 기준 70% 매진예상 · 80% 매진임박 · 95% 매진` : `당사 기준: 소진율 70% 매진예상 · 80% 매진임박 · 95% 매진`;
+    const info = `<span class="muted" title="${esc(rule)} · 잔여 = 주문가능 · 소진 = 주문(미리+방송) ÷ (주문 + 주문가능) · 예상 = 현재 속도면 남은 시간">기준 ⓘ</span>`;
+    if (!SO.length) return scopeBar() + `<p class="muted">품절 알림 속성 없음 ${info}</p>`;
+    return scopeBar() + `<div class="g colhd"><span>속성 · 상품</span><span>잔여</span><span>소진</span><span>예상</span><span>매진현황</span></div>` + SO.map(x => `<div class="so"><div class="g"><span class="nm"><b>${esc(attrL(x.r) || '전체')}</b></span><b class="num warn">${fmt(x.avail)}</b><span class="num muted">${Math.round(x.pct)}%</span><span class="num muted">${x.eta !== null && x.avail > 0 ? Math.ceil(x.eta) + '분' : '-'}</span><span class="lvc">${lvOne(x)}</span></div><div class="muted nm2" title="${esc(x.r.prod)}">${esc(shortP(x.r.prod))}</div></div>`).join('') + `<p>${info}</p>`;
   }
+
 
   // ---------- 그래프: 상품별 시간대 판매량 (기록 기반) ----------
   const PAL = ['#0088ff', '#e8336d', '#1a9e6e', '#e8890c', '#8250df', '#0b9bb5', '#b35900', '#6e7781'];
@@ -1169,7 +1253,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     const d = graphSeries(g.bucket);
     if (!d || d.n < 2) return ctl + `<p class="muted">기록이 쌓이는 중이에요. ${g.bucket}분 이상 지나면 그래프가 그려져요.</p>`;
     const ys = g.mode === 'rate' ? d.inc : d.cum;
-    const W = 510, H = 230, L = 44, R = 8, T = 10, Bm = 24, iw = W - L - R, ih = H - T - Bm;
+    const W = Math.max(300, ($('.p').clientWidth || 400) - 26), H = 230, L = 44, R = 18, T = 10, Bm = 24, iw = W - L - R, ih = H - T - Bm;
     const vmax = Math.max(1, ...ys.flat().filter(v => v !== null));
     const step = Math.pow(10, Math.floor(Math.log10(vmax))) * ([1, 2, 5, 10].find(m => vmax / (Math.pow(10, Math.floor(Math.log10(vmax))) * m) <= 5) || 10);
     const ymax = Math.ceil(vmax / step) * step;
@@ -1177,7 +1261,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
     for (let v = 0; v <= ymax; v += step) svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#eee"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`;
     const every = Math.max(1, Math.ceil(d.nAxis / 6));
-    for (let i = 0; i < d.nAxis; i += every) svg += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${new Date(d.startT + (i + 1) * d.B).toTimeString().slice(0, 5)}</text>`;
+    for (let i = 0; i < d.nAxis; i += every) svg += `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : x(i) > W - 30 ? 'end' : 'middle'}">${new Date(d.startT + (i + 1) * d.B).toTimeString().slice(0, 5)}</text>`;
     d.prods.forEach((p, pi) => {
       const col = PAL[pi % PAL.length], pts = ys[pi].slice(0, d.n).map((v, i) => [x(i), y(v || 0), v || 0, i]);
       svg += `<polyline fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" points="${pts.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' ')}"/>`;
@@ -1222,11 +1306,11 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     return `<div class="set">
       <label>기준 지표<select data-k="metric"><option ${cfg.metric === '방송' ? 'selected' : ''}>방송</option><option ${cfg.metric === '총' ? 'selected' : ''}>총</option></select></label>
       ${f('interval', '표 확인 간격', '초')}${f('win', '급상승 비교 구간', '분')}${f('surge', '급상승 알림 기준', '개 이상')}
-      <label>품절임박 기준<select data-k="soldMode"><option ${cfg.soldMode !== '회사+예측' ? 'selected' : ''}>회사</option><option ${cfg.soldMode === '회사+예측' ? 'selected' : ''}>회사+예측</option></select></label>
-      <div class="muted">회사 = 생판종 매진 기준(소진율 70% 매진예상 · 80% 매진임박 · 95% 매진). 회사+예측 = 여기에 아래 두 기준을 더해 더 일찍 알려요(대신 알림이 늘어요).</div>
+      <label>품절 알림 기준<select data-k="soldMode"><option ${usePred() ? 'selected' : ''}>예측</option><option ${!usePred() ? 'selected' : ''}>당사</option></select></label>
+      <div class="muted">예측(기본) = 아래 두 기준으로 미리 알리고, 당사 매진 기준(소진율 70% 매진예상 · 80% 매진임박 · 95% 매진)은 매진현황(파랑·노랑·빨강)으로 보여줘요. 당사 = 당사 단계가 오를 때만 알려요.</div>
       ${f('soldQty', '예측: 잔여', '개 이하')}${f('soldEta', '예측: 소진 예상', '분 이내')}
       <h4 style="margin:12px 0 4px">🔔 팝업으로 받을 알림</h4>
-      ${[['prod', '🏆 상품 1위 교체'], ['color', '🎨 컬러 1위 교체'], ['attr', '🥇 속성 1위 교체'], ['surge', '🔥 급상승'], ['sold', '⚠️ 품절임박'], ['end', '📋 방송 종료 요약']].map(([k, l]) => `<label>${l}<input data-al="${k}" type="checkbox" ${cfg.al[k] !== false ? 'checked' : ''} style="width:auto"></label>`).join('')}
+      ${[['prod', '🏆 상품 1위 교체'], ['color', '🎨 컬러 1위 교체'], ['attr', '🥇 속성 1위 교체'], ['surge', '🔥 급상승'], ['sold', '⚠️ 품절 알림'], ['lv', '🔵🟡🔴 당사 매진 단계 (예측 모드)'], ['end', '📋 방송 종료 요약']].map(([k, l]) => `<label>${l}<input data-al="${k}" type="checkbox" ${cfg.al[k] !== false ? 'checked' : ''} style="width:auto"></label>`).join('')}
       <div class="muted">끈 알림도 알림 탭에는 남아요. 제목줄 🔔를 누르면 모든 팝업을 잠시 멈춰요(조용히 모드).</div>
       <h4 style="margin:12px 0 4px">🏷 브랜드 이름 연결</h4>
       <div class="muted">${Object.keys(cfg.alias).length ? Object.entries(cfg.alias).map(([a, b]) => `${esc(a)} → ${esc(b)}`).join(' · ') : '직접 연결한 이름 없음'}</div>
@@ -1246,6 +1330,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
 
   // 이벤트
   root.addEventListener('click', e => {
+    const sc = e.target.closest('[data-sc]'); if (sc) { cfg.ui.scope = sc.dataset.sc; saveCfg(); S.lastTop = null; S.lastTopProd = null; S.lastTopCol = new Map(); return analyze(); }
     const t = e.target.closest('[data-t]'); if (t) { S.tab = t.dataset.t; saveUi(); return render(); }
     const br = e.target.closest('[data-br]'); if (br) { cfg.brand = br.dataset.br; saveCfg(); $('.menu').hidden = true; resetView(); return; }
     const lk = e.target.closest('[data-link]'); if (lk) {
@@ -1323,7 +1408,16 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
       const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); cfg.ui.h = parseFloat($('.p').style.height) || null; cfg.ui.bottom = host.style.bottom; saveCfg(); };
       document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
     });
+    // 왼쪽 손잡이: 오른쪽 모서리는 그대로 두고 폭 조절
+    $('.wgrip').addEventListener('mousedown', e => {
+      e.preventDefault();
+      const p = $('.p'), x0 = e.clientX, w0 = p.getBoundingClientRect().width;
+      const mv = ev => { p.style.width = Math.max(360, Math.min(innerWidth - 40, w0 - (ev.clientX - x0))) + 'px'; };
+      const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); cfg.ui.w = parseFloat(p.style.width) || null; saveCfg(); render(); };
+      document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+    });
   })();
+  if (cfg.ui.w) $('.p').style.width = Math.min(cfg.ui.w, innerWidth - 40) + 'px';
   // 마지막 위치·높이 (화면 밖이면 기본 위치)
   if (cfg.ui.right && parseFloat(cfg.ui.right) < innerWidth - 100) host.style.right = cfg.ui.right;
   if (cfg.ui.bottom && parseFloat(cfg.ui.bottom) < innerHeight - 100) host.style.bottom = cfg.ui.bottom;
