@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.7';
-  const CHANGES = '화면을 정리했어요: 속성 탭이 컬러×사이즈 표로 바뀌어 모든 속성이 한눈에 보여요. 상품·컬러·속성·품절 탭에 판매·최근·잔여·매진현황이 같은 칸으로 나오고, 기본은 지금 구간 상품만 보여요(탭 위에서 방송 전체로 바꿀 수 있어요). 품절 알림은 예측으로 미리 알리고 당사 매진 기준(70·80·95%)은 매진현황으로 표시해요. 패널 왼쪽 모서리를 끌면 폭을 바꿀 수 있어요.';
+  const VER = '4.8';
+  const CHANGES = '지금 구간을 방송실적관리의 ON AIR 표시로 찾아요(ON AIR 상품과 같은 노출분으로 묶인 상품). ON AIR를 못 찾으면 최근 5분 판매로 대신해요. 속성 표는 판매+잔여가 기본이고 판매만 보기도 있어요. 세일즈원 화면이 다른 창에 가려져도 확인 간격이 덜 느려지도록 바꿨고, 표를 못 읽은 시간이 생기면 알림 탭에 남겨요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -151,19 +151,22 @@
     const ht = cellsOf(els[hi]), aT = ht.length - 1 - ht.indexOf('총주문액'), aE = ht.length - 1 - ht.indexOf('예상취급액'), aX = ht.indexOf('노출분') >= 0 ? ht.length - 1 - ht.indexOf('노출분') : -1;
     let dirty = false;
     // 노출분이 같은 상품끼리 = 같은 주방송 묶음(구간). 순서대로, 노출분 0:00(시너지·미리주문 코드)은 건너뜀
-    const groups = [];
+    const groups = []; let onAirName = null;
+    const isOnAir = el => /on\s*[-_]?\s*air/i.test(el.innerText || '') || !!el.querySelector('[class*="onair" i],[class*="on-air" i],[class*="on_air" i],[alt*="on air" i],[alt*="onair" i],[title*="on air" i],[src*="onair" i]');
     const tail = els.slice(hi + 1, hi + 400), endI = tail.findIndex(el => /^합계/.test(cellsOf(el).find(v => v) || ''));
     (endI < 0 ? tail : tail.slice(0, endI)).forEach(el => {
       const c = cellsOf(el), ci = c.findIndex(v => /^\d{10}$/.test(v));
       if (ci < 0) return;
       const name = c.slice(ci + 1).find(v => v && !isNum(v)), tot = toN(c[c.length - 1 - aT] || ''), exp = toN(c[c.length - 1 - aE] || '');
       const xm = aX >= 0 && /^(\d+):(\d{2})$/.exec(c[c.length - 1 - aX] || '');
+      if (name && !onAirName && isOnAir(el)) onAirName = norm(name);
       if (name && xm && (+xm[1] || +xm[2])) { const g = groups[groups.length - 1], key = xm[0]; if (g && g.key === key) g.names.push(norm(name)); else groups.push({ key, dur: +xm[1] + xm[2] / 60, names: [norm(name)] }); }
       if (!name || !tot || exp === null) return;
       const r = exp / tot;
       if (r < 0.05 || r > 1.2) return;
       if (!CONV[name] || Math.abs(CONV[name].r - r) > 0.0005) { CONV[name] = { r, code: c[ci], t: Date.now() }; dirty = true; }
     });
+    if (onAirName) { const g = groups.find(g => g.names.includes(onAirName)); S.onAir = { t: Date.now(), name: onAirName, names: new Set(g ? g.names : [onAirName]) }; }
     if (dirty) { const old = Date.now() - 30 * 86400000; Object.keys(CONV).forEach(k => { if (CONV[k].t < old) delete CONV[k]; }); try { localStorage.setItem(CONV_KEY, JSON.stringify(CONV)); } catch (e) {} }
     const bw = broadcastWindow();
     if (bw && groups.length) {
@@ -303,6 +306,8 @@
         if (add) { recDirty = true; S.frt = null; }
       }
     }
+    const gap = S.lastScan ? Date.now() - S.lastScan : 0;
+    if (gap > Math.max(45000, cfg.interval * 6000)) { S.gap = { st: S.lastScan, en: Date.now() }; alert('⏸ 기록 끊김', `${hhmmss(S.lastScan).slice(0, 5)}~${hhmmss(Date.now()).slice(0, 5)} 약 ${Math.round(gap / 60000)}분 동안 표를 못 읽었어요 (화면이 가려졌거나 절전)`, 'gap'); }
     S.lastScan = Date.now();
     S.lastFound = found;
     if (recDirty) recSave();
@@ -349,7 +354,14 @@
   }
 
   function nowScope() {
-    const now = Date.now(); let base = S.hist[0];
+    const now = Date.now(); S.nowBy = '';
+    // 1순위: 방송실적관리의 ON AIR 상품 + 같은 노출분 묶음 (뒷콜이 들어오는 지난 구간 상품은 빠짐)
+    if (S.onAir && now - S.onAir.t < 90000) {
+      const set = new Set(); S.rows.forEach(r => { if (inScope(r.prod) && S.onAir.names.has(norm(r.prod.replace(/ \(\d+\)$/, '')))) set.add(r.prod); });
+      if (set.size) { S.nowBy = 'onair'; return set; }
+    }
+    // 2순위: 최근 5분 판매 (ON AIR 표시를 못 찾았을 때)
+    let base = S.hist[0];
     if (!base || now - base.t < 60000) return null; // 1분 이상 쌓이기 전엔 전체
     for (const h of S.hist) { if (h.t <= now - 5 * 60000) base = h; else break; }
     const act = new Set(), cur = S.hist[S.hist.length - 1];
@@ -357,7 +369,7 @@
     if (!act.size) return null;
     const segs = tableSegs(broadcastWindow());
     if (segs) segs.forEach(g => { const ns = new Set(g.names); const inG = p => ns.has(norm(p.replace(/ \(\d+\)$/, ''))); if ([...act].some(inG)) S.rows.forEach(r => { if (inScope(r.prod) && inG(r.prod)) act.add(r.prod); }); });
-    return act;
+    S.nowBy = 'sale'; return act;
   }
   const inView = p => cfg.ui.scope === 'all' || !S.nowSet || S.nowSet.has(p);
   function products() {
@@ -520,10 +532,24 @@
     };
     document.addEventListener('click', h, true);
   }
+  // ---------- 타이머: 화면이 가려지면 브라우저가 일반 타이머를 크게 늦추므로, 가능하면 워커 타이머로 깨운다 ----------
+  const WT = (() => {
+    let w = null, id = 0; const cbs = new Map();
+    const fallback = () => { if (!w) return; w = null; cbs.forEach(o => { o.n = setInterval(o.f, o.ms); }); };
+    try {
+      const u = URL.createObjectURL(new Blob(['const t={};onmessage=e=>{const[k,i,ms]=e.data;if(k==="s")t[i]=setInterval(()=>postMessage(i),ms);else{clearInterval(t[i]);delete t[i];}}'], { type: 'text/javascript' }));
+      w = new Worker(u); w.onmessage = e => { const o = cbs.get(e.data); if (o) o.f(); }; w.onerror = fallback;
+    } catch (e) { w = null; }
+    return {
+      set(f, ms) { const i = ++id, o = { f, ms }; cbs.set(i, o); if (w) w.postMessage(['s', i, ms]); else o.n = setInterval(f, ms); return i; },
+      clear(i) { const o = cbs.get(i); if (!o) return; cbs.delete(i); if (o.n !== undefined) clearInterval(o.n); if (w) w.postMessage(['c', i]); },
+      ok: () => !!w,
+    };
+  })();
   let refreshTimer;
   function setupRefresh() {
-    clearInterval(refreshTimer);
-    if (cfg.autoRefresh > 0 && cfg.refreshSel) refreshTimer = setInterval(() => {
+    WT.clear(refreshTimer);
+    if (cfg.autoRefresh > 0 && cfg.refreshSel) refreshTimer = WT.set(() => {
       // 안전장치: 지정했던 화면(주소)에서만, 지정 때와 같은 글자의 버튼만, 저장·등록류 버튼은 절대 클릭 안 함
       if (!cfg.refreshHash || location.hash.split('?')[0] !== cfg.refreshHash) return;
       const b = document.querySelector(cfg.refreshSel);
@@ -992,14 +1018,14 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .min .sum .x,.min .sum .more{display:none}
     .st[hidden]{display:none}
     .wgrip{position:absolute;left:0;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:3}.wgrip:hover{background:rgba(0,136,255,.18)}
-    .scope{display:flex;align-items:center;gap:8px;margin-bottom:6px}.scope .seg{margin:0}
+    .scope{display:flex;align-items:center;gap:8px;margin-bottom:6px}.seg button{white-space:nowrap}.scope .seg{margin:0}
     .g{display:grid;grid-template-columns:minmax(0,1fr) 50px 44px 50px 66px;gap:4px;align-items:center;padding:2px 0}.g>*:not(:first-child){text-align:right}
     .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.nm2{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:-1px 0 3px}
     .num{font-variant-numeric:tabular-nums}.lvc{white-space:nowrap}
     .prod2{margin:2px 0 8px}.pn{display:flex;justify-content:space-between;gap:6px;font-weight:700}.pn .nm{flex:1}
     .ptitle{display:flex;justify-content:space-between;gap:8px;font-weight:700;margin:8px 0 2px}
     table.mx{table-layout:fixed;font-size:12px;margin:2px 0 4px}table.mx th,table.mx td{border:1px solid #eaeef2;padding:2px;text-align:center;font-variant-numeric:tabular-nums}table.mx th{background:#fafbfc;font-weight:600;color:#57606a;font-size:11px}table.mx tr th:first-child{width:68px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    table.mx td small{display:block;color:#d1242f;font-size:10px;line-height:1}table.mx td.tot{background:#fafbfc}
+    table.mx td small{display:block;color:#d1242f;font-size:10px;line-height:1}table.mx td.tot{background:#fafbfc}table.mx td small.lf{color:#57606a}table.mx td.m3 small.lf{color:#fff}table.mx td small.lf:before{content:'잔 '}
     td.m1{background:#cfe3ff}td.m2{background:#ffe680}td.m3{background:#ff3b30;color:#fff}td.m3 small{color:#fff}td.mp{box-shadow:inset 0 0 0 2px #8250df}
     .sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px;border:1px solid #d0d7de}.sw.m0{background:rgba(0,136,255,.45)}.sw.m1{background:#cfe3ff}.sw.m2{background:#ffe680}.sw.m3{background:#ff3b30}.sw.mp{box-shadow:inset 0 0 0 2px #8250df;background:#fff}
     .note1{background:#fff8e6;border:1px solid #f5d48a;color:#7a4d00;border-radius:6px;padding:4px 8px;font-size:12px;margin:4px 0}.note1 summary{font-weight:600;font-size:12px}
@@ -1029,6 +1055,10 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     }
     if (ft !== null && ft <= bw.st && now - S.startT < 8000 && now < bw.en) return `<div class="band ok">✔ 방송 시작 ${Math.max(0, Math.round((bw.st - ft) / 60000))}분 전부터 기록 중이에요. 준비수량과 흐름이 모두 남아요.</div>`;
     return '';
+  }
+  function gapBand() {
+    if (!S.gap || Date.now() - S.gap.en > 10 * 60000 || S.gapHide === S.gap.en) return '';
+    return `<div class="band warn2"><button class="x" data-a="gapx" title="닫기">✕</button>⏸ ${hhmmss(S.gap.st).slice(0, 5)}~${hhmmss(S.gap.en).slice(0, 5)} 동안 표를 못 읽었어요. 세일즈원 창이 가려졌거나 PC가 절전했을 수 있어요.</div>`;
   }
   function verBand() {
     if (!S.verMsg) return '';
@@ -1064,7 +1094,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     if (!$('.menu').hidden) $('.menu').innerHTML = menuHtml();
     root.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === S.tab));
     const stx = statusHtml(); $('.st').innerHTML = stx; $('.st').hidden = !stx;
-    $('.bands').innerHTML = verBand() + bandsHtml();
+    $('.bands').innerHTML = verBand() + gapBand() + bandsHtml();
     if (!S.rows.size || !v || !v.P.length) {
       $('.sum').textContent = S.rows.size ? `${bName(cfg.brand)} 상품이 지금 표에 없어요. 브랜드 버튼에서 바꿀 수 있어요.` : '주문수량관리 표를 화면에 띄워주세요';
       $('.bd').innerHTML = S.tab === 'set' ? settingsHtml() : S.rows.size ? '' : `<p class="muted">세일즈원 실시간 판매현황의 주문수량관리 패널에서 속성 행을 읽어옵니다. ${cfg.interval}초마다 확인 중이에요.<br><br>계속 0개면 ⚙ 탭의 <b>진단 정보 복사</b>를 눌러 Claude에게 보내주세요.</p>`;
@@ -1100,8 +1130,8 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
   const lvCount = (rs, sm) => { const c = [3, 2, 1].map(n => [n, rs.filter(r => (sm.get(r.key) || {}).lv === n).length]).filter(a => a[1]); const pr = rs.filter(r => { const x = sm.get(r.key); return x && !x.lv && x.why.length; }).length; return c.map(([n, k]) => `<i class="lvb ${LV[n].cls}">${LV[n].icon}${k}</i>`).join('') + (pr ? `<i class="lvb lv0">⏱${pr}</i>` : '') || '<span class="muted">-</span>'; };
   const lvOne = x => (!x ? '<span class="muted">-</span>' : x.lv ? lvBadge(x.lv) : '<i class="lvb lv0">⏱예측</i>');
   const wLab = () => { const m = S.view.D.mins; return m < 1 ? '1분' : Math.round(m) + '분'; };
-  const scopeBar = () => { const all = cfg.ui.scope === 'all', n = S.nowSet ? S.nowSet.size : 0;
-    return `<div class="scope"><span class="seg"><button data-sc="now" class="${all ? '' : 'on'}">지금 구간</button><button data-sc="all" class="${all ? 'on' : ''}">방송 전체</button></span><span class="muted" title="지금 구간 = 최근 5분 안에 판매가 늘어난 상품 + 방송실적관리에서 같은 노출분(같은 구간)으로 묶인 상품. 기록이 1분 이상 쌓이기 전이나 판매가 없으면 전체를 보여요.">${all ? '방송 전체' : S.nowSet ? `상품 ${n}개 · 기준 ⓘ` : '기록이 쌓이면 구간을 찾아요 ⓘ'}</span></div>`; };
+  const scopeBar = (right = '') => { const all = cfg.ui.scope === 'all', n = S.nowSet ? S.nowSet.size : 0;
+    return `<div class="scope"><span class="seg"><button data-sc="now" class="${all ? '' : 'on'}">지금 구간</button><button data-sc="all" class="${all ? 'on' : ''}">방송 전체</button></span><span class="muted" title="지금 구간 = 방송실적관리에서 ON AIR 표시가 붙은 상품과 같은 노출분(같은 구간)으로 묶인 상품. 방송실적관리 표가 화면에 없거나 ON AIR를 못 찾으면 최근 5분 안에 판매가 늘어난 상품으로 대신해요(이때는 뒷콜이 들어오는 지난 구간 상품도 섞일 수 있어요).">${right ? (all ? '' : S.nowSet ? `${S.nowBy === 'onair' ? 'ON AIR ' : ''}${n}개 ⓘ` : 'ⓘ') : all ? '방송 전체' : S.nowSet ? `${S.nowBy === 'onair' ? 'ON AIR 기준' : '판매 기준'} · 상품 ${n}개 ⓘ` : '기록이 쌓이면 구간을 찾아요 ⓘ'}</span>${right ? `<span style="margin-left:auto">${right}</span>` : ''}</div>`; };
   const colHd = (a = '이름') => `<div class="g colhd"><span>${a}</span><span>판매</span><span>${wLab()}</span><span>잔여</span><span>매진현황</span></div>`;
   const gRow = (name, v, d, a, lv, title, cls = '') => `<div class="g ${cls}"><span class="nm" title="${esc(title || '')}">${name}</span><b class="num">${fmt(v)}</b><span class="num ${d ? 'up' : 'muted'}">${d ? '+' + fmt(d) : '0'}</span><span class="num muted">${fmt(a)}</span><span class="lvc">${lv}</span></div>`;
   const dMap = () => new Map(S.view.D.list.map(x => [x.r.key, x.d]));
@@ -1109,23 +1139,25 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
   function topHtml() {
     const { P } = S.view, sm = soMap(), dm = dMap();
     const sizeSort = (a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || String(a).localeCompare(b);
-    return scopeBar() + P.map(x => {
+    const mv = cfg.ui.mxv === 'sale' ? 'sale' : 'both', mseg = `<span class="seg">${[['both', '판매+잔여'], ['sale', '판매']].map(([k, l]) => `<button data-mxv="${k}" class="${mv === k ? 'on' : ''}">${l}</button>`).join('')}</span>`;
+    return scopeBar(mseg) + P.map(x => {
       const lr = x.rs.filter(live);
       const hd = `<div class="ptitle"><span class="nm" title="${esc(x.p)}">${esc(shortP(x.p))}</span><span class="num">${fmt(x.sum)}${x.win ? ` <span class="up">+${fmt(x.win)}</span>` : ''}</span></div>`;
       if (!lr.length) return hd + '<div class="muted">접혀 있어 상품 합계만 추적 중이에요. 펼치면 속성별로 보여요.</div>';
       const sizes = [...new Set(lr.map(r => r.size))].sort(sizeSort), cs = {};
-      lr.forEach(r => { cs[r.color] = (cs[r.color] || 0) + metric(r); });
+      const ca = {}; lr.forEach(r => { cs[r.color] = (cs[r.color] || 0) + metric(r); ca[r.color] = (ca[r.color] || 0) + (r.avail || 0); });
       const colors = Object.keys(cs).sort((a, b) => cs[b] - cs[a]), mx = Math.max(1, ...lr.map(metric));
       const cell = (c, z) => {
         const r = lr.find(r => r.color === c && r.size === z);
         if (!r) return '<td class="muted">·</td>';
         const o = sm.get(r.key), d = dm.get(r.key) || 0, tot = (r.pre || 0) + (r.live || 0), pct = tot + (r.avail || 0) > 0 ? Math.round(tot / (tot + (r.avail || 0)) * 100) : 0;
         const cls = o && o.lv ? 'm' + o.lv : o ? 'mp' : '', bg = o && o.lv ? '' : `background:rgba(0,136,255,${(0.05 + 0.5 * metric(r) / mx).toFixed(2)})`;
-        return `<td class="${cls}" style="${bg}" title="${esc(pfx(c, z))} · 판매 ${fmt(metric(r))} · 최근 ${wLab()} +${fmt(d)} · 잔여 ${fmt(r.avail || 0)} · 소진 ${pct}%${o ? ' · ' + (o.lv ? LV[o.lv].name : '소진 예측' + (o.eta !== null ? ' 약 ' + Math.ceil(o.eta) + '분' : '')) : ''}"><b>${fmt(metric(r))}</b>${d ? `<small>+${fmt(d)}</small>` : ''}</td>`;
+        const mv = cfg.ui.mxv === 'sale' ? 'sale' : 'both', big = metric(r), sub = mv === 'both' ? `${d ? '+' + fmt(d) : '&nbsp;'}</small><small class="lf">${fmt(r.avail || 0)}` : (d ? '+' + fmt(d) : '');
+        return `<td class="${cls}" style="${bg}" title="${esc(pfx(c, z))} · 판매 ${fmt(metric(r))} · 최근 ${wLab()} +${fmt(d)} · 잔여 ${fmt(r.avail || 0)} · 소진 ${pct}%${o ? ' · ' + (o.lv ? LV[o.lv].name : '소진 예측' + (o.eta !== null ? ' 약 ' + Math.ceil(o.eta) + '분' : '')) : ''}"><b>${fmt(big)}</b>${sub ? `<small>${sub}</small>` : ''}</td>`;
       };
       const showTot = sizes.length > 1;
-      return hd + `<table class="mx"><tr><th></th>${sizes.map(z => `<th>${z === '-' ? '' : esc(z)}</th>`).join('')}${showTot ? '<th>합</th>' : ''}</tr>${colors.map(c => `<tr><th title="${esc(c === '-' ? '' : c)}">${c === '-' ? '' : esc(c)}</th>${sizes.map(z => cell(c, z)).join('')}${showTot ? `<td class="tot"><b>${fmt(cs[c])}</b></td>` : ''}</tr>`).join('')}</table>`;
-    }).join('') + `<div class="lg"><span><i class="sw m0"></i>많이 팔릴수록 진함</span><span><i class="sw m1"></i>매진예상</span><span><i class="sw m2"></i>매진임박</span><span><i class="sw m3"></i>매진</span>${usePred() ? '<span><i class="sw mp"></i>소진 예측</span>' : ''}<span>작은 빨간 수 = 최근 ${wLab()}</span></div>`;
+      return hd + `<table class="mx"><tr><th></th>${sizes.map(z => `<th>${z === '-' ? '' : esc(z)}</th>`).join('')}${showTot ? '<th>합</th>' : ''}</tr>${colors.map(c => `<tr><th title="${esc(c === '-' ? '' : c)}">${c === '-' ? '' : esc(c)}</th>${sizes.map(z => cell(c, z)).join('')}${showTot ? `<td class="tot"><b>${fmt(cs[c])}</b>${mv === 'both' ? `<small class="lf">${fmt(ca[c])}</small>` : ''}</td>` : ''}</tr>`).join('')}</table>`;
+    }).join('') + `<div class="lg"><span><i class="sw m0"></i>많이 팔릴수록 진함</span><span><i class="sw m1"></i>매진예상</span><span><i class="sw m2"></i>매진임박</span><span><i class="sw m3"></i>매진</span>${usePred() ? '<span><i class="sw mp"></i>소진 예측</span>' : ''}<span>${cfg.ui.mxv === 'sale' ? '작은 빨간 수 = 최근 ' + wLab() : '큰 수 = 판매 · 빨간 수 = 최근 ' + wLab() + ' · 잔 = 잔여(주문가능)'}</span></div>`;
   }
 
   const sg = n => (n > 0 ? '+' : '') + fmt(n);
@@ -1330,6 +1362,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
 
   // 이벤트
   root.addEventListener('click', e => {
+    const mx = e.target.closest('[data-mxv]'); if (mx) { cfg.ui.mxv = mx.dataset.mxv; saveCfg(); return render(); }
     const sc = e.target.closest('[data-sc]'); if (sc) { cfg.ui.scope = sc.dataset.sc; saveCfg(); S.lastTop = null; S.lastTopProd = null; S.lastTopCol = new Map(); return analyze(); }
     const t = e.target.closest('[data-t]'); if (t) { S.tab = t.dataset.t; saveUi(); return render(); }
     const br = e.target.closest('[data-br]'); if (br) { cfg.brand = br.dataset.br; saveCfg(); $('.menu').hidden = true; resetView(); return; }
@@ -1357,6 +1390,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     if (a === 'close') api.destroy();
     if (a === 'brand') { const mn = $('.menu'); mn.hidden = !mn.hidden; if (!mn.hidden) mn.innerHTML = menuHtml(); }
     if (a === 'quiet') { cfg.quietMode = !cfg.quietMode; saveCfg(); if (cfg.quietMode) $('.toasts').innerHTML = ''; render(); }
+    if (a === 'gapx') { S.gapHide = S.gap && S.gap.en; return render(); }
     if (a === 'more') { cfg.sumOpen = !cfg.sumOpen; saveCfg(); render(); }
     if (a === 'verx') { S.verMsg = false; render(); }
     if (a === 'latex') { const bw = broadcastWindow(); S.lateHide = bw && bw.st; render(); }
@@ -1428,14 +1462,14 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     if (S.rows.size) analyze(); else render();
   }
   let loop;
-  function startLoop() { clearInterval(loop); loop = setInterval(scan, Math.max(cfg.interval, 2) * 1000); }
+  function startLoop() { WT.clear(loop); loop = WT.set(scan, Math.max(cfg.interval, 2) * 1000); }
 
   const api = {
     ver: VER,
     show() { host.style.display = ''; },
     toggle() { host.style.display = host.style.display === 'none' ? '' : 'none'; },
     // 닫기 = 완전 종료 (감시·자동 새로고침 중지). 기록은 브라우저에 남아 다음 실행 때 이어짐
-    destroy() { clearInterval(dirTimer); clearInterval(loop); clearInterval(refreshTimer); recSave(); host.remove(); delete window.__attrRadar; },
+    destroy() { clearInterval(dirTimer); WT.clear(loop); WT.clear(refreshTimer); recSave(); host.remove(); delete window.__attrRadar; },
     scan, state: S, _dir: DIR, _save: dirSave,
   };
   window.__attrRadar = api;
