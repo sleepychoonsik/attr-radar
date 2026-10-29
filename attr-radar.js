@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.12.1';
-  const CHANGES = '👕 착장 교체 제안을 몇 분 전에 알릴지 ⚙ 설정에서 10분(기본) 또는 15분으로 고를 수 있어요. 15분은 더 일찍 알지만 판매가 치솟는 중에는 예상 시간이 실제보다 길게 나올 수 있어요.';
+  const VER = '4.12.2';
+  const CHANGES = 'PD 메시지 버튼을 말풍선 아이콘이 들어간 "PD에게" 버튼으로 바꿨어요. 알림 탭에서는 각 줄 오른쪽 끝에 같은 자리로 붙어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -514,6 +514,7 @@
   const soldEff = o => { const c = (o.after - o.before) / o.before * 100; return c <= -10 ? ((o.lost || 0) >= 50 ? ' (판매 막힘 → 리오더 우선)' : ' (상품 판매 감소 · 품절 영향 작음)') : c >= 10 ? ' (판매 상승 중 품절 → 인기 속성)' : ' (영향 적음)'; };
   // ---------- PD석 메시지 초안 (v4.9) ----------
   // 실제 MD→PD 메시지(9/21~10/27 생방송 13회)를 6가지 상황으로 묶은 문장 틀. 숫자는 레이더 규칙이 채우고, 문장 다듬기는 틀 또는 Claude, 전송은 MD가 직접.
+  const PD_ICO = '<svg class="pdi" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6a1.5 1.5 0 0 1-1.5 1.5H7l-3.2 2.6c-.3.3-.8 0-.8-.4V11h0A1.5 1.5 0 0 1 2 9.5z" fill="currentColor"/></svg>';
   const PD_T = { A: '매진 푸쉬', B: '아소트 매진 임박', C: '매진 발생', D: '컬러 1위 교체', E: '주력 상품 전환', F: '반응 하락', G: '매진 전 착장 교체' };
   // 입고 보여주는 제안은 아우터만 (바지·이너 니트는 방송 중 갈아입기 어려움)
   const isOuter = p => /재킷|자켓|코트|점퍼|패딩|다운|야상|블레이저|가디건|베스트|블루종|봄버|트렌치|셔켓|무스탕|아우터|파카|바람막이|사파리|케이프|판초|조끼/.test(p || '');
@@ -1185,11 +1186,11 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .set label{display:flex;justify-content:space-between;align-items:center;margin:5px 0}.set input{width:60px}
     .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.btns button{border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit}
     .toasts{position:fixed;right:16px;top:16px;display:flex;flex-direction:column;gap:6px}
-    .pdb{margin-top:6px;border:0;border-radius:6px;padding:3px 8px;background:#0088ff;color:#fff;cursor:pointer;font:inherit;font-size:12px}
+    .pdb{margin-top:6px;border:1px solid #0088ff;border-radius:12px;padding:2px 9px;background:#fff;color:#0070d6;cursor:pointer;font:inherit;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.pdb:hover{background:#0088ff;color:#fff}.pdi{flex:none}.lgr{display:flex;align-items:flex-start;gap:6px}.lgr>span{flex:1;min-width:0}
     .pdbox{position:fixed;right:360px;top:16px;width:380px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #d0d7de;border-radius:10px;padding:10px 12px;box-shadow:0 6px 20px rgba(0,0,0,.25);z-index:2;font-size:13px}
     .pdbox[hidden]{display:none}.pdbox .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}.pdbox .ph button{border:0;background:none;cursor:pointer;font-size:14px}
     .pdbox .po{display:flex;gap:6px;align-items:flex-start;margin-top:8px}.pdbox textarea{flex:1;font:inherit;font-size:13px;border:1px solid #d0d7de;border-radius:6px;padding:4px 6px;resize:vertical}.pdbox .po button{border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit;white-space:nowrap}
-    .log .pdb,.bd .pdb{margin:0 0 0 4px;padding:0 6px;font-size:11px}
+    .log .pdb,.bd .pdb{margin:1px 0 0;padding:0 7px;font-size:11px;line-height:18px}
     .t{background:#1f2328;color:#fff;border-radius:8px;padding:8px 12px;width:330px;box-shadow:0 4px 14px rgba(0,0,0,.25);animation:f .25s}
     @keyframes f{from{opacity:0;transform:translateY(6px)}}
     .min .tabs,.min .bd,.min .grip,.min .st,.min .band{display:none}
@@ -1217,7 +1218,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
 
   function toast(title, msg, e) {
     const t = document.createElement('div'); t.className = 't';
-    t.innerHTML = `<b>${esc(title)}</b><br>${esc(msg)}` + (e && e.pd ? `<div><button class="pdb" data-pd="${e.id}">✉ PD 메시지</button></div>` : '');
+    t.innerHTML = `<b>${esc(title)}</b><br>${esc(msg)}` + (e && e.pd ? `<div><button class="pdb" data-pd="${e.id}">${PD_ICO} PD에게 보낼 메시지</button></div>` : '');
     $('.toasts').prepend(t); setTimeout(() => t.remove(), e && e.pd ? 15000 : 8000);
   }
   // PD 메시지 창: 초안 2개(고쳐서 복사) + Claude로 다듬기
@@ -1225,7 +1226,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
   function openPd(id) {
     const e = S.log.find(l => l.id === id); if (!e || !e.pd) return;
     const d = e.pd, b = $('.pdbox'); S.pdCur = e;
-    b.innerHTML = `<div class="ph"><b>✉ PD석 메시지 · ${d.k}. ${esc(PD_T[d.k])}</b><button data-a="pdx" title="닫기">✕</button></div>
+    b.innerHTML = `<div class="ph"><b>${PD_ICO} PD석 메시지 · ${d.k}. ${esc(PD_T[d.k])}</b><button data-a="pdx" title="닫기">✕</button></div>
       <div class="muted">${hhmmss(e.t)} ${esc(e.title)} · ${esc(d.why)}</div>
       ${[d.m1, d.m2].map((m, i) => `<div class="po"><span class="muted">안${i + 1}</span><textarea data-pm="${i}" rows="2">${esc(m)}</textarea><button data-a="pdc" data-i="${i}">복사</button></div>`).join('')}
       <div class="btns"><button data-a="pdai">Claude로 다듬기 (프롬프트 복사)</button></div>
@@ -1520,7 +1521,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     const names = [...new Set([...S.rows.values(), ...S.parked.values()].map(r => r.prod))].sort((a, b) => shortP(b).length - shortP(a).length);
     const logP = l => l.p || names.find(p => l.msg.startsWith(shortP(p)));
     const LG = S.log.filter(l => { const p = logP(l); return !p || inScope(p); });
-    return LG.length ? LG.map(l => `<div><span class="muted">${hhmmss(l.t)}</span> <b>${esc(l.title)}</b> ${esc(l.msg)}${l.pd && l.id ? ` <button class="pdb" data-pd="${l.id}" title="PD석 메시지 초안">✉</button>` : ''}</div>`).join('') : '<p class="muted">아직 알림이 없어요.</p>';
+    return LG.length ? LG.map(l => `<div class="lgr"><span><span class="muted">${hhmmss(l.t)}</span> <b>${esc(l.title)}</b> ${esc(l.msg)}</span>${l.pd && l.id ? `<button class="pdb" data-pd="${l.id}" title="PD석 메시지 초안 보기">${PD_ICO} PD에게</button>` : ''}</div>`).join('') : '<p class="muted">아직 알림이 없어요.</p>';
   }
 
   function settingsHtml() {
