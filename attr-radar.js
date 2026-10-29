@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.8.1';
-  const CHANGES = '지금 구간을 방송실적관리의 ON AIR 표시로 찾아요(ON AIR 상품과 같은 노출분으로 묶인 상품). ON AIR를 못 찾으면 최근 5분 판매로 대신해요. 속성 표는 판매+잔여가 기본이고 판매만 보기도 있어요. 세일즈원 화면이 다른 창에 가려져도 확인 간격이 덜 느려지도록 바꿨고, 표를 못 읽은 시간이 생기면 알림 탭에 남겨요.';
+  const VER = '4.9';
+  const CHANGES = '소진 예측은 방송 종료 전에 소진될 속성만 알려요(방송이 15분도 안 남으면 남은 시간까지만). 품절 탭에서 방송 종료 뒤 소진 예상이면 \'종료후\'로 표시해요. 그래프는 1분 단위로 고정하고 지금 구간/방송 전체를 고를 수 있어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -378,6 +378,9 @@
     return [...m.entries()].map(([p, rs]) => ({ p, rs, sum: rs.reduce((s, r) => s + metric(r), 0) })).sort((a, b) => b.sum - a.sum);
   }
 
+  // 예측 기준 시간: 기본 15분, 방송이 그보다 적게 남았으면 남은 방송 시간까지만 (방송 종료 뒤 소진은 알리지 않음)
+  const pgmLeft = () => { const bw = broadcastWindow(); return bw ? (bw.en - Date.now()) / 60000 : null; };
+  const etaLimit = () => { const l = pgmLeft(); return l === null ? cfg.soldEta : Math.max(0, Math.min(cfg.soldEta, l)); };
   function soldOut(rateMap, mins) {
     const out = [];
     S.rows.forEach(r => {
@@ -388,7 +391,7 @@
       const eta = rate > 0 && mins >= 1 ? avail / rate : null; // 1분 이상 쌓인 뒤에만 소진 예상
       if (tot <= 0) return;
       const lv = avail > 0 ? lvOf(pct) : 3;
-      const why = usePred() ? [avail <= cfg.soldQty && 'qty', eta !== null && eta <= cfg.soldEta && 'eta'].filter(Boolean) : [];
+      const why = usePred() ? [avail <= cfg.soldQty && 'qty', eta !== null && eta <= etaLimit() && 'eta'].filter(Boolean) : [];
       if (lv || why.length) out.push({ r, pct, avail, eta, lv, why });
     });
     return out.sort((a, b) => b.lv - a.lv || (a.eta ?? 1e9) - (b.eta ?? 1e9) || a.avail - b.avail);
@@ -1204,10 +1207,10 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
 
   function soldHtml() {
     const { SO } = S.view;
-    const rule = usePred() ? `알림: 현재 속도로 ${cfg.soldEta}분 내 소진 예상 또는 잔여 ${cfg.soldQty}개 이하 · 매진현황: 당사 기준 70% 매진예상 · 80% 매진임박 · 95% 매진` : `당사 기준: 소진율 70% 매진예상 · 80% 매진임박 · 95% 매진`;
+    const rule = usePred() ? `알림: 현재 속도로 ${cfg.soldEta}분 내(방송이 덜 남았으면 방송 종료 전) 소진 예상 또는 잔여 ${cfg.soldQty}개 이하 · 매진현황: 당사 기준 70% 매진예상 · 80% 매진임박 · 95% 매진` : `당사 기준: 소진율 70% 매진예상 · 80% 매진임박 · 95% 매진`;
     const info = `<span class="muted" title="${esc(rule)} · 잔여 = 주문가능 · 소진 = 주문(미리+방송) ÷ (주문 + 주문가능) · 예상 = 현재 속도면 남은 시간">기준 ⓘ</span>`;
     if (!SO.length) return scopeBar() + `<p class="muted">품절 알림 속성 없음 ${info}</p>`;
-    return scopeBar() + `<div class="g colhd"><span>속성 · 상품</span><span>잔여</span><span>소진</span><span>예상</span><span>매진현황</span></div>` + SO.map(x => `<div class="so"><div class="g"><span class="nm"><b>${esc(attrL(x.r) || '전체')}</b></span><b class="num warn">${fmt(x.avail)}</b><span class="num muted">${Math.round(x.pct)}%</span><span class="num muted">${x.eta !== null && x.avail > 0 ? Math.ceil(x.eta) + '분' : '-'}</span><span class="lvc">${lvOne(x)}</span></div><div class="muted nm2" title="${esc(x.r.prod)}">${esc(shortP(x.r.prod))}</div></div>`).join('') + `<p>${info}</p>`;
+    return scopeBar() + `<div class="g colhd"><span>속성 · 상품</span><span>잔여</span><span>소진</span><span>예상</span><span>매진현황</span></div>` + SO.map(x => `<div class="so"><div class="g"><span class="nm"><b>${esc(attrL(x.r) || '전체')}</b></span><b class="num warn">${fmt(x.avail)}</b><span class="num muted">${Math.round(x.pct)}%</span><span class="num muted">${x.eta !== null && x.avail > 0 ? (pgmLeft() !== null && x.eta > pgmLeft() ? '<span title="방송 종료 뒤 소진 예상">종료후</span>' : Math.ceil(x.eta) + '분') : '-'}</span><span class="lvc">${lvOne(x)}</span></div><div class="muted nm2" title="${esc(x.r.prod)}">${esc(shortP(x.r.prod))}</div></div>`).join('') + `<p>${info}</p>`;
   }
 
 
@@ -1281,7 +1284,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
   function graphHtml() {
     const g = S.g || (S.g = { mode: 'rate', bucket: 1 });
     const seg = (k, opts) => `<span class="seg">${opts.map(([v, l]) => `<button data-g="${k}:${v}" class="${String(g[k]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</span>`;
-    const ctl = seg('mode', [['rate', '구간별 판매'], ['cum', '누적']]) + seg('bucket', [[1, '1분'], [3, '3분'], [5, '5분']]);
+    g.bucket = 1; const all = cfg.ui.scope === 'all', ctl = seg('mode', [['rate', '구간별 판매'], ['cum', '누적']]) + `<span class="seg"><button data-sc="now" class="${all ? '' : 'on'}">지금 구간</button><button data-sc="all" class="${all ? 'on' : ''}">방송 전체</button></span>`;
     const d = graphSeries(g.bucket);
     if (!d || d.n < 2) return ctl + `<p class="muted">기록이 쌓이는 중이에요. ${g.bucket}분 이상 지나면 그래프가 그려져요.</p>`;
     const ys = g.mode === 'rate' ? d.inc : d.cum;
