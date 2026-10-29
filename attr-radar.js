@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.11';
-  const CHANGES = '리뷰 탭을 팀 리뷰 88건 형식에 맞춰 바꿨어요. 맨 위 한눈에 3줄, 구간마다 판매 비중(상의:하의)·흐름(첫 반응·피크·꺾임)·미리주문·상품별 수량비중/판매비중 표, 품절은 연쇄 품절로 묶고 놓친 판매와 함께, 다음 액션은 상품-컬러별 리오더 후보/소진 필요로 정리해요. 레이더가 모르는 기획수량·예상소진률과 빈 분취/분공 줄은 뺐어요. 구간은 방송실적관리 노출분(가중분 있으면 함께)으로 나눠요.';
+  const VER = '4.11.1';
+  const CHANGES = '리뷰 구간 머리줄에 방송실적관리 노출분과 가중분(방송 종료 후 표에 뜨는 값, 같은 구간 상품 합)을 분:초로 보여줘요. 한눈에 첫 줄은 품절 건수·놓친 판매를 빼고 연쇄 품절만 남겼어요(머리말과 겹침).';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -148,20 +148,21 @@
     const hi = els.findIndex(el => { const t = cellsOf(el); return t.includes('총주문액') && t.includes('예상취급액'); });
     if (hi < 0) return;
     // 머리줄에서 두 칸 뒤에 몇 칸이 더 있는지 → 상품 줄 끝에서부터 같은 위치 (앞쪽 칸은 묶음 머리라 개수가 다름)
-    const ht = cellsOf(els[hi]), aT = ht.length - 1 - ht.indexOf('총주문액'), aE = ht.length - 1 - ht.indexOf('예상취급액'), aX = ht.indexOf('노출분') >= 0 ? ht.length - 1 - ht.indexOf('노출분') : -1, aW = ht.indexOf('가중분') >= 0 ? ht.length - 1 - ht.indexOf('가중분') : -1;
+    const ht = cellsOf(els[hi]), aT = ht.length - 1 - ht.indexOf('총주문액'), aE = ht.length - 1 - ht.indexOf('예상취급액'), aX = ht.indexOf('노출분') >= 0 ? ht.length - 1 - ht.indexOf('노출분') : -1;
     let dirty = false;
     // 노출분이 같은 상품끼리 = 같은 주방송 묶음(구간). 순서대로, 노출분 0:00(시너지·미리주문 코드)은 건너뜀
-    const groups = []; const onAirNames = new Set();
+    const groups = []; const onAirNames = new Set(); let wPend = null;
     const isOnAir = el => /on\s*[-_]?\s*air/i.test(el.innerText || '') || !!el.querySelector('[class*="onair" i],[class*="on-air" i],[class*="on_air" i],[alt*="on air" i],[alt*="onair" i],[title*="on air" i],[src*="onair" i]');
     const tail = els.slice(hi + 1, hi + 400), endI = tail.findIndex(el => /^합계/.test(cellsOf(el).find(v => v) || ''));
     (endI < 0 ? tail : tail.slice(0, endI)).forEach(el => {
       const c = cellsOf(el), ci = c.findIndex(v => /^\d{10}$/.test(v));
-      if (ci < 0) return;
+      // 가중분: 상품 줄 바로 다음 줄(구분2 줄)의 마지막 칸(분:초). 방송이 끝나야 채워짐 → 같은 묶음 상품 가중분을 더함
+      if (ci < 0) { const lw = /^(\d+):(\d{2})$/.exec([...c].reverse().find(v => v) || ''); if (wPend && lw) wPend.wdur = (wPend.wdur || 0) + +lw[1] + lw[2] / 60; wPend = null; return; }
+      wPend = null;
       const name = c.slice(ci + 1).find(v => v && !isNum(v)), tot = toN(c[c.length - 1 - aT] || ''), exp = toN(c[c.length - 1 - aE] || '');
       const xm = aX >= 0 && /^(\d+):(\d{2})$/.exec(c[c.length - 1 - aX] || '');
       if (name && isOnAir(el)) onAirNames.add(norm(name)); // 세일즈원은 지금 구간 상품마다 순서 칸에 ONAIR 표시
-      const wv = aW >= 0 ? (c[c.length - 1 - aW] || '') : '', wm = /^(\d+):(\d{2})$/.exec(wv), wdur = wm ? +wm[1] + wm[2] / 60 : toN(wv);
-      if (name && xm && (+xm[1] || +xm[2])) { const g = groups[groups.length - 1], key = xm[0]; if (g && g.key === key) g.names.push(norm(name)); else groups.push({ key, dur: +xm[1] + xm[2] / 60, wdur: wdur || null, names: [norm(name)] }); }
+      if (name && xm && (+xm[1] || +xm[2])) { let g = groups[groups.length - 1]; const key = xm[0]; if (g && g.key === key) g.names.push(norm(name)); else { g = { key, dur: +xm[1] + xm[2] / 60, wdur: null, names: [norm(name)] }; groups.push(g); } wPend = g; }
       if (!name || !tot || exp === null) return;
       const r = exp / tot;
       if (r < 0.05 || r > 1.2) return;
@@ -857,7 +858,7 @@
         const mi = sIdx.get(ps[0] ? ps[0].p : ''), m3 = i => (incA[mi][i] + (incA[mi][i - 1] || 0) + (incA[mi][i - 2] || 0)) / 3;
         let top = -1, ti = s; if (mi !== undefined) for (let i = s; i <= e; i++) if (m3(i) > top) { top = m3(i); ti = i; }
         let drop = null; if (mi !== undefined && top > 0) for (let i = ti + 1; i <= e - 2; i++) if (m3(i) < top / 2 && m3(i + 1) < top / 2 && m3(i + 2) < top / 2) { drop = t0 + i * 60000; break; }
-        if (r.names) return { tab: true, guess: !!r.guess, no: r.no, st: r.st, en: r.en, len: Math.round((r.en - r.st) / 60000), wlen: r.wdur ? Math.round(r.wdur) : null, first: fr, lastBest, last5, part: r.st < t0, sum, rate: sum / len, ps, main: SP.filter(p => r.names.has(baseN(p))), peak: { st: t0 + pk.i * 60000, v: pk.v }, type, drop, top: Math.round(top), first10: per.slice(0, 10).reduce((a, b) => a + b, 0) };
+        if (r.names) return { tab: true, guess: !!r.guess, no: r.no, st: r.st, en: r.en, len: Math.round((r.en - r.st) / 60000), wlen: r.wdur || null, xlen: r.en - r.st, first: fr, lastBest, last5, part: r.st < t0, sum, rate: sum / len, ps, main: SP.filter(p => r.names.has(baseN(p))), peak: { st: t0 + pk.i * 60000, v: pk.v }, type, drop, top: Math.round(top), first10: per.slice(0, 10).reduce((a, b) => a + b, 0) };
         return { no: k + 1, st: t0 + s * 60000, en: t0 + (e + 1) * 60000, len, first: fr, lastBest, last5, sum, rate: sum / len, ps, main: ps.filter(o => o.v >= sum * 0.15).map(o => o.p), peak: { st: t0 + pk.i * 60000, v: pk.v }, type, drop, top: Math.round(top), first10: per.slice(0, 10).reduce((a, b) => a + b, 0) };
       }).filter(g => g.sum > 0 || g.tab);
       flow = { t0, n, inc };
@@ -919,7 +920,8 @@
   const soldTime = x => (x.t ? (x.t2 && x.t2 !== x.t && hm(x.t2) !== hm(x.t) ? `${hm(x.t)}~${hm(x.t2)}` : hm(x.t)) : '');
   const soldChg = x => (x.before !== null && x.before > 0 ? `품절 후 상품 분당 판매 ${x.after >= x.before ? '+' : ''}${Math.round((x.after - x.before) / x.before * 100)}%${soldEff(x)}` : '');
   const soldLost = x => (x.lost ? `놓친 판매 약 ${fmt(x.lost)}개(${x.until ? hm(x.until) + '까지 ' : ''}추정)` : '');
-  const segHead = g => `${g.guess ? '주방송 묶음' : g.no + '구간'} · ${g.tab ? '노출 ' : ''}${g.len}분${g.wlen ? ` · 가중 ${g.wlen}분` : ''} · ${hm(g.st)}~${hm(g.en)}`;
+  const mmss = v => `${Math.floor(v + 1e-6)}:${String(Math.round((v - Math.floor(v + 1e-6)) * 60)).padStart(2, '0')}`;
+  const segHead = g => `${g.guess ? '주방송 묶음' : g.no + '구간'} · ${g.tab ? `노출 ${mmss(g.xlen / 60000)}` : `${g.len}분`}${g.wlen ? ` · 가중 ${mmss(g.wlen)}` : ''} · ${hm(g.st)}~${hm(g.en)}`;
   const isLow = p => /팬츠|데님|슬랙스|트라우저|스커트|쇼츠|진$/.test(p);
   function segInfo(m, g) {
     const ps = m.prods.filter(x => x.seg === g.no), sm = g.ps.reduce((a, o) => a + o.v, 0) || 1;
@@ -935,7 +937,8 @@
   const prodLine = x => `${nm(x.p)} 판매 ${fmt(x.sum)} · 주문가능 ${fmt(Math.max(0, x.avail))} · 주문소진 ${pct0(x.st)}${x.mins !== null && x.mins !== undefined && x.mins < 120 && x.pkr >= 1 ? ` (남은 주문가능 = 피크 분당 ${fmt(Math.round(x.pkr))}개로 약 ${x.mins}분 판매분)` : ''}`;
   function glance(m) {
     const L = [];
-    if (m.sold.length) { const ch = m.soldG.find(x => x.z.length > 1); L.push(`품절 ${m.sold.length}건${m.lostTot ? ` · 놓친 판매 약 ${fmt(m.lostTot)}개(추정)` : ''}${ch ? ` · ${nm(ch.p)} ${attrLbl(ch.c, ch.z)} ${soldTime(ch)} 연쇄 품절` : ''}`); }
+    const ch = m.soldG.filter(x => x.z.length > 1).sort((a, b) => b.lost - a.lost)[0]; // 머리말에 품절 건수가 있으니 여기선 연쇄 품절만
+    if (ch) L.push(`${nm(ch.p)} ${attrLbl(ch.c, ch.z)} ${soldTime(ch)} 연쇄 품절`);
     m.segs.filter(g => g.lastBest).forEach(g => L.push(`${g.guess ? '주방송 묶음' : g.no + '구간'} 끝 5분(${hm(g.en - 5 * 60000)}~${hm(g.en)})이 구간 최고 · 5분간 ${cfg.metric}주문 +${fmt(g.last5)}개`));
     let best = null; m.prods.forEach(x => x.colors.forEach(c => { if (Math.abs(c.gap) >= 10 && (!best || Math.abs(c.gap) > Math.abs(best.c.gap))) best = { x, c }; }));
     if (best) L.push(`${nm(best.x.p)} ${best.c.n} 수량비중 ${pct0(best.c.sup)} → 판매비중 ${pct0(best.c.sal)} (${sgn(best.c.gap)}%p)`);
