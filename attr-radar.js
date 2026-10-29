@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.9';
-  const CHANGES = '소진 예측은 방송 종료 전에 소진될 속성만 알려요(방송이 15분도 안 남으면 남은 시간까지만). 품절 탭에서 방송 종료 뒤 소진 예상이면 \'종료후\'로 표시해요. 그래프는 1분 단위로 고정하고 지금 구간/방송 전체를 고를 수 있어요.';
+  const VER = '4.9.1';
+  const CHANGES = '컬러 탭에서 상품 합계가 매진현황 칸 밑에 붙던 것을 판매 칸으로 맞췄어요. 소진 예측은 방송 종료 전에 소진될 속성만 알리고, 그래프는 1분 단위 + 지금 구간/방송 전체로 볼 수 있어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -1025,7 +1025,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .g{display:grid;grid-template-columns:minmax(0,1fr) 50px 44px 50px 66px;gap:4px;align-items:center;padding:2px 0}.g>*:not(:first-child){text-align:right}
     .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.nm2{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:-1px 0 3px}
     .num{font-variant-numeric:tabular-nums}.lvc{white-space:nowrap}
-    .prod2{margin:2px 0 8px}.pn{display:flex;justify-content:space-between;gap:6px;font-weight:700}.pn .nm{flex:1}
+    .prod2{margin:2px 0 8px}.g.ph{font-weight:700;margin-top:8px;border-top:1px solid #f0f2f4;padding-top:5px}.g.ph .nm{font-weight:700}.pn{display:flex;justify-content:space-between;gap:6px;font-weight:700}.pn .nm{flex:1}
     .ptitle{display:flex;justify-content:space-between;gap:8px;font-weight:700;margin:8px 0 2px}
     table.mx{table-layout:fixed;font-size:12px;margin:2px 0 4px}table.mx th,table.mx td{border:1px solid #eaeef2;padding:2px;text-align:center;font-variant-numeric:tabular-nums}table.mx th{background:#fafbfc;font-weight:600;color:#57606a;font-size:11px}table.mx tr th:first-child{width:68px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     table.mx td small{display:block;color:#d1242f;font-size:10px;line-height:1}table.mx td.tot{background:#fafbfc}table.mx td small.lf{color:#57606a}table.mx td.m3 small.lf{color:#fff}table.mx td small.lf:before{content:'잔 '}
@@ -1185,7 +1185,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
       const L = [...g.entries()].map(([k, rs]) => ({ k, rs, v: rs.reduce((a, r) => a + metric(r), 0), d: rs.reduce((a, r) => a + (dm.get(r.key) || 0), 0), a: rs.reduce((a, r) => a + (r.avail || 0), 0) }));
       if (noColor) L.sort((a, b) => (parseFloat(a.k) || 0) - (parseFloat(b.k) || 0)); else L.sort((a, b) => b.v - a.v);
       const top = noColor ? null : L[0], hot = [...L].sort((a, b) => b.d - a.d)[0];
-      return `<div class="ptitle"><span class="nm" title="${esc(x.p)}">${esc(shortP(x.p))}</span><span class="num">${fmt(x.sum)}</span></div>` + L.map(o => gRow(`${o === top ? '👑 ' : ''}${esc(o.k === '-' ? '전체' : o.k)}`, o.v, o.d, o.a, lvCount(o.rs, sm), o.k)).join('') +
+      return gRow(esc(shortP(x.p)), x.sum, x.win, x.avail, lvCount(lr, sm), x.p, 'ph') + L.map(o => gRow(`${o === top ? '👑 ' : ''}${esc(o.k === '-' ? '전체' : o.k)}`, o.v, o.d, o.a, lvCount(o.rs, sm), o.k)).join('') +
         (hot && hot.d > 0 && hot !== L[0] && !noColor ? `<div class="muted">🔥 지금 반응은 <b>${esc(hot.k)}</b>가 가장 빨라요 (+${fmt(hot.d)})</div>` : '');
     }).join('') + `<p class="muted">판매 = ${cfg.metric}주문 누적 · ${wLab()} = 최근 ${wLab()} 증가 · 잔여 = 주문가능 · 👑 = 상품 안 1위</p>`;
   }
