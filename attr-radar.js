@@ -1,6 +1,6 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.8';
+  const VER = '4.8.1';
   const CHANGES = '지금 구간을 방송실적관리의 ON AIR 표시로 찾아요(ON AIR 상품과 같은 노출분으로 묶인 상품). ON AIR를 못 찾으면 최근 5분 판매로 대신해요. 속성 표는 판매+잔여가 기본이고 판매만 보기도 있어요. 세일즈원 화면이 다른 창에 가려져도 확인 간격이 덜 느려지도록 바꿨고, 표를 못 읽은 시간이 생기면 알림 탭에 남겨요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
@@ -151,7 +151,7 @@
     const ht = cellsOf(els[hi]), aT = ht.length - 1 - ht.indexOf('총주문액'), aE = ht.length - 1 - ht.indexOf('예상취급액'), aX = ht.indexOf('노출분') >= 0 ? ht.length - 1 - ht.indexOf('노출분') : -1;
     let dirty = false;
     // 노출분이 같은 상품끼리 = 같은 주방송 묶음(구간). 순서대로, 노출분 0:00(시너지·미리주문 코드)은 건너뜀
-    const groups = []; let onAirName = null;
+    const groups = []; const onAirNames = new Set();
     const isOnAir = el => /on\s*[-_]?\s*air/i.test(el.innerText || '') || !!el.querySelector('[class*="onair" i],[class*="on-air" i],[class*="on_air" i],[alt*="on air" i],[alt*="onair" i],[title*="on air" i],[src*="onair" i]');
     const tail = els.slice(hi + 1, hi + 400), endI = tail.findIndex(el => /^합계/.test(cellsOf(el).find(v => v) || ''));
     (endI < 0 ? tail : tail.slice(0, endI)).forEach(el => {
@@ -159,14 +159,14 @@
       if (ci < 0) return;
       const name = c.slice(ci + 1).find(v => v && !isNum(v)), tot = toN(c[c.length - 1 - aT] || ''), exp = toN(c[c.length - 1 - aE] || '');
       const xm = aX >= 0 && /^(\d+):(\d{2})$/.exec(c[c.length - 1 - aX] || '');
-      if (name && !onAirName && isOnAir(el)) onAirName = norm(name);
+      if (name && isOnAir(el)) onAirNames.add(norm(name)); // 세일즈원은 지금 구간 상품마다 순서 칸에 ONAIR 표시
       if (name && xm && (+xm[1] || +xm[2])) { const g = groups[groups.length - 1], key = xm[0]; if (g && g.key === key) g.names.push(norm(name)); else groups.push({ key, dur: +xm[1] + xm[2] / 60, names: [norm(name)] }); }
       if (!name || !tot || exp === null) return;
       const r = exp / tot;
       if (r < 0.05 || r > 1.2) return;
       if (!CONV[name] || Math.abs(CONV[name].r - r) > 0.0005) { CONV[name] = { r, code: c[ci], t: Date.now() }; dirty = true; }
     });
-    if (onAirName) { const g = groups.find(g => g.names.includes(onAirName)); S.onAir = { t: Date.now(), name: onAirName, names: new Set(g ? g.names : [onAirName]) }; }
+    if (onAirNames.size) { const names = new Set(onAirNames); groups.filter(g => g.names.some(n => onAirNames.has(n))).forEach(g => g.names.forEach(n => names.add(n))); S.onAir = { t: Date.now(), names }; }
     if (dirty) { const old = Date.now() - 30 * 86400000; Object.keys(CONV).forEach(k => { if (CONV[k].t < old) delete CONV[k]; }); try { localStorage.setItem(CONV_KEY, JSON.stringify(CONV)); } catch (e) {} }
     const bw = broadcastWindow();
     if (bw && groups.length) {
