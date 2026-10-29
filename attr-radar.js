@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.11.4';
-  const CHANGES = '리뷰 리오더 후보: 비중 차이 없이 품절만 있었던 컬러는 그 컬러 놓친 판매가 50개 이상일 때만 올려요(작은 사이즈 하나 품절된 컬러는 품절 파트에만 남음). 근거에 놓친 판매도 붙여요.';
+  const VER = '4.12';
+  const CHANGES = 'PD 메시지: PD석 메시지 307개 방송 4,048건 분석을 반영했어요. 아우터의 인기 컬러에서 사이즈 절반 이상이 지금 속도로 10분 안에 매진될 것 같으면 👕 착장 교체 제안(G)을 띄우고, 매진 전에 다른 컬러로 갈아입자는 초안을 만들어요. 입고 보여달라는 문장은 아우터일 때만 쓰고, 바지·이너는 대서 보여달라고 써요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -447,6 +447,21 @@
       }
     });
     S.colSums = cs;
+    // G 매진 전 착장 교체: 지금 잘 나가는 아우터의 최근 1위 컬러에서 사이즈 절반 이상이 지금 속도로 10분 안에 매진(이미 매진 포함)될 것 같을 때.
+    // 아직 남은 사이즈가 있을 때(매진 전)만, 같은 상품 다른 컬러 잔여 30개 이상이 있을 때만
+    { const maxW = Math.max(0, ...P.map(x => x.win || 0));
+      P.forEach(x => {
+        if (!maxW || (x.win || 0) < maxW * 0.5 || !isOuter(x.p) || !x.colors || x.colors.length < 2) return;
+        const hot = [...x.colors].sort((a, b) => b.win - a.win)[0];
+        if (!hot || !(hot.win > 0) || hot.avail <= 0) return;
+        const rs = x.rs.filter(r => live(r) && r.color === hot.c), soon = [], left = [];
+        rs.forEach(r => { const rt = rateMap.get(r.key) || 0, a = r.avail || 0; if (a <= 0) soon.push({ z: r.size, done: true }); else if (rt > 0 && a / rt <= 10) soon.push({ z: r.size, eta: a / rt }); else left.push(r.size); });
+        const pend = soon.filter(o => !o.done);
+        if (!rs.length || soon.length < Math.ceil(rs.length / 2) || !pend.length) return;
+        const nx = x.colors.filter(o => o.c !== hot.c && o.avail >= 30).sort((a, b) => b.win - a.win || b.sum - a.sum)[0]; if (!nx) return;
+        const zs = soon.map(o => o.z).filter(z => z && z !== '-').sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0)), et = Math.max(1, Math.ceil(Math.max(...pend.map(o => o.eta)))), all = !left.length;
+        once('wr:' + x.p + '|' + hot.c, 24 * 60, '👕 착장 교체 제안', `${shortP(x.p)} ${hot.c} ${all ? '전체' : zs.join('·')} 약 ${et}분 안에 매진 예상 → ${nx.c} 잔여 ${fmt(nx.avail)}`, 'wear', x.p, { pd: () => pdMake('wear', { p: x.p, c: hot.c, zs, all, eta: et, n: rs.length, nc: nx.c, navail: nx.avail }) });
+      }); }
     S.view = { D, P, top, SO, rateMap };
     if (P.length > 1 && P[0].sum > 0) {
       if (!S.lastTopProd) S.lastTopProd = P[0].p;
@@ -498,7 +513,9 @@
   const soldEff = o => { const c = (o.after - o.before) / o.before * 100; return c <= -10 ? ((o.lost || 0) >= 50 ? ' (판매 막힘 → 리오더 우선)' : ' (상품 판매 감소 · 품절 영향 작음)') : c >= 10 ? ' (판매 상승 중 품절 → 인기 속성)' : ' (영향 적음)'; };
   // ---------- PD석 메시지 초안 (v4.9) ----------
   // 실제 MD→PD 메시지(9/21~10/27 생방송 13회)를 6가지 상황으로 묶은 문장 틀. 숫자는 레이더 규칙이 채우고, 문장 다듬기는 틀 또는 Claude, 전송은 MD가 직접.
-  const PD_T = { A: '매진 푸쉬', B: '아소트 매진 임박', C: '매진 발생', D: '컬러 1위 교체', E: '주력 상품 전환', F: '반응 하락' };
+  const PD_T = { A: '매진 푸쉬', B: '아소트 매진 임박', C: '매진 발생', D: '컬러 1위 교체', E: '주력 상품 전환', F: '반응 하락', G: '매진 전 착장 교체' };
+  // 입고 보여주는 제안은 아우터만 (바지·이너 니트는 방송 중 갈아입기 어려움)
+  const isOuter = p => /재킷|자켓|코트|점퍼|패딩|다운|야상|블레이저|가디건|베스트|블루종|봄버|트렌치|셔켓|무스탕|아우터|파카|바람막이|사파리|케이프|판초|조끼/.test(p || '');
   // 받침: 한글은 글자로, 숫자는 읽는 소리로(66=육, 88=팔). 8 = ㄹ받침
   const jong = w => {
     const t = String(w).trim(), ch = t.slice(-1), c = ch.charCodeAt(0);
@@ -536,7 +553,7 @@
         const ca = colorAvail(r.prod, c);
         if (ca.n > 1 && ca.a <= 50) return { k: 'B', why: `${why} · ${c} 사이즈 합계 잔여 ${fmt(ca.a)}`,
           m1: `${c} 소량이라 한번 대서 보여주시면 아소트 매진 나올 것 같아요`,
-          m2: `${c} 사이즈 합쳐 잔여 ${fmt(ca.a)}개예요. ${c} 착장으로 한번 비춰주세요` };
+          m2: `${c} 사이즈 합쳐 잔여 ${fmt(ca.a)}개예요. ${c} ${isOuter(r.prod) ? '입고' : '대서'} 한번 비춰주세요` };
       }
       // 당사 단계(70·80%)에 들어갔으면 그 이름으로, 아직 전이면 '매진예상'이라 부르지 않고 속도로 말한다
       const soon = eta !== null ? `지금 속도면 약 ${eta}분 뒤 매진이에요` : '곧 매진될 것 같아요';
@@ -548,7 +565,13 @@
       const sp = shortP(d.p);
       return { k: 'D', why: `${sp} ${d.c} 누적 ${fmt(d.sum)}${d.prev ? `, ${d.prev}${d.psum !== null ? `(${fmt(d.psum)})` : ''} 제치고 1위` : ' 1위'}${d.win ? ` · 최근 +${fmt(d.win)}` : ''}`,
         m1: `지금 ${d.c} 1등이에요! ${d.c} 대서 먼저 밀어볼까요?`,
-        m2: `${ga(d.c)} 너무 잘 나가네요. ${d.c} 착장으로 한번씩 비춰주세요` };
+        m2: isOuter(d.p) ? `피디님, ${d.c} 반응 좋아요! ${d.c} 입고 한번 보여주세요` : `${ga(d.c)} 너무 잘 나가네요. ${d.c} 위주로 컬러 짚어주세요` };
+    }
+    if (kind === 'wear') {
+      const sp = shortP(d.p), what = d.all ? `${d.c} 전체` : `${d.c} ${d.zs.join('·')}`;
+      return { k: 'G', why: `${sp} ${d.c} 사이즈 ${d.n}개 중 ${d.zs.length}개가 지금 속도로 약 ${d.eta}분 안에 매진(이미 매진 포함) · 다음 ${d.nc} 잔여 ${fmt(d.navail)}`,
+        m1: `피디님, ${what} 약 ${d.eta}분이면 매진이에요. 매진 전에 ${ro(d.nc)} 갈아입으면 어떨까요?`,
+        m2: `${d.c} 곧 매진이라 ${d.c} 매진 푸쉬하면서 ${d.nc} 입고 보여주세요` };
     }
     if (kind === 'prod') {
       const sp = shortP(d.p), pv = d.prev ? shortP(d.prev) : null, x = d.pwin > 0 ? d.win / d.pwin : null;
@@ -580,6 +603,8 @@
       '[규칙]',
       '- 입력에 없는 소재·기능·가격·혜택은 쓰지 않는다.',
       "- 매진 표현은 당사 기준 단계에 맞춘다: 소진율 70% '매진예상', 80% '매진임박', 95% '매진'.",
+      '- 입어/입고/갈아입는 제안은 아우터(재킷·코트·점퍼·다운 등)만. 바지·이너는 "대서 보여주세요"로 쓴다.',
+      '- 시간 운영(분수 연장·단축)은 제안하지 않는다.',
       '[출력]',
       '안1 (방향: …): 메시지',
       '  근거: …',
@@ -1506,7 +1531,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
       <div class="muted">예측(기본) = 아래 두 기준으로 미리 알리고, 당사 매진 기준(소진율 70% 매진예상 · 80% 매진임박 · 95% 매진)은 매진현황(파랑·노랑·빨강)으로 보여줘요. 당사 = 당사 단계가 오를 때만 알려요.</div>
       ${f('soldQty', '예측: 잔여', '개 이하')}${f('soldEta', '예측: 소진 예상', '분 이내')}
       <h4 style="margin:12px 0 4px">🔔 팝업으로 받을 알림</h4>
-      ${[['prod', '🏆 상품 1위 교체'], ['color', '🎨 컬러 1위 교체'], ['attr', '🥇 속성 1위 교체'], ['surge', '🔥 급상승'], ['sold', '⚠️ 품절 알림'], ['lv', '🔵🟡🔴 당사 매진 단계 (예측 모드)'], ['end', '📋 방송 종료 요약']].map(([k, l]) => `<label>${l}<input data-al="${k}" type="checkbox" ${cfg.al[k] !== false ? 'checked' : ''} style="width:auto"></label>`).join('')}
+      ${[['prod', '🏆 상품 1위 교체'], ['color', '🎨 컬러 1위 교체'], ['wear', '👕 착장 교체 제안'], ['attr', '🥇 속성 1위 교체'], ['surge', '🔥 급상승'], ['sold', '⚠️ 품절 알림'], ['lv', '🔵🟡🔴 당사 매진 단계 (예측 모드)'], ['end', '📋 방송 종료 요약']].map(([k, l]) => `<label>${l}<input data-al="${k}" type="checkbox" ${cfg.al[k] !== false ? 'checked' : ''} style="width:auto"></label>`).join('')}
       <div class="muted">끈 알림도 알림 탭에는 남아요. 제목줄 🔔를 누르면 모든 팝업을 잠시 멈춰요(조용히 모드).</div>
       <h4 style="margin:12px 0 4px">🏷 브랜드 이름 연결</h4>
       <div class="muted">${Object.keys(cfg.alias).length ? Object.entries(cfg.alias).map(([a, b]) => `${esc(a)} → ${esc(b)}`).join(' · ') : '직접 연결한 이름 없음'}</div>
