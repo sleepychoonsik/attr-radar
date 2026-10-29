@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.12.4';
-  const CHANGES = 'PD 메시지 버튼을 말풍선 아이콘 + "PD 메시지" 연한 파란 칩으로 바꿨어요. 알림 탭에서는 각 줄 오른쪽 끝에 같은 자리로 붙어요.';
+  const VER = '4.12.5';
+  const CHANGES = 'PD 메시지 초안 창이 화면 오른쪽 위가 아니라 패널 바로 옆 아래쪽에 붙어요(오른쪽에 자리가 없으면 왼쪽). 패널을 옮기면 같이 따라가요. 버튼은 말풍선 + PD 메시지 연한 파란 칩이에요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -1187,7 +1187,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.btns button{border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit}
     .toasts{position:fixed;right:16px;top:16px;display:flex;flex-direction:column;gap:6px}
     .pdb{margin-top:6px;border:0;border-radius:4px;padding:2px 8px;background:#eef6ff;color:#0062b8;cursor:pointer;font:inherit;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.pdb:hover{background:#d6e9ff}.pdi{flex:none}.lgr{display:flex;align-items:flex-start;gap:6px}.lgr>span{flex:1;min-width:0}
-    .pdbox{position:fixed;right:360px;top:16px;width:380px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #d0d7de;border-radius:10px;padding:10px 12px;box-shadow:0 6px 20px rgba(0,0,0,.25);z-index:2;font-size:13px}
+    .pdbox{position:fixed;left:0;top:0;width:380px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #d0d7de;border-radius:10px;padding:10px 12px;box-shadow:0 6px 20px rgba(0,0,0,.25);z-index:2;font:13px/1.45 'Pretendard Variable',Pretendard,'Malgun Gothic','Apple SD Gothic Neo',sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';color:#1f2328}.pdbox button{font:inherit;font-size:12px}
     .pdbox[hidden]{display:none}.pdbox .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}.pdbox .ph button{border:0;background:none;cursor:pointer;font-size:14px}
     .pdbox .po{display:flex;gap:6px;align-items:flex-start;margin-top:8px}.pdbox textarea{flex:1;font:inherit;font-size:13px;border:1px solid #d0d7de;border-radius:6px;padding:4px 6px;resize:vertical}.pdbox .po button{border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit;white-space:nowrap}
     .log .pdb,.bd .pdb{margin:1px 0 0;padding:0 7px;font-size:11px;line-height:18px}
@@ -1232,6 +1232,15 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
       <div class="btns"><button data-a="pdai">Claude로 다듬기 (프롬프트 복사)</button></div>
       <p class="muted">골라서 고친 뒤 복사 → 세일즈원 'PD석으로 메시지 전송'에 붙여넣으세요. 레이더는 보내지 않아요.</p>`;
     b.hidden = false;
+    // 패널 오른쪽 옆, 아래쪽 맞춤. 오른쪽에 자리가 없으면 왼쪽. 패널을 옮기면 따라감
+    const place = () => {
+      const r = $('.p').getBoundingClientRect(), w = b.offsetWidth, h = b.offsetHeight, W = window.innerWidth, H = window.innerHeight;
+      const x = r.right + 8 + w <= W - 8 ? r.right + 8 : Math.max(8, r.left - 8 - w);
+      const y = Math.min(H - h - 8, Math.max(8, r.bottom - h));
+      b.style.left = x + 'px'; b.style.top = y + 'px';
+    };
+    const tick = () => { if (b.hidden || S.pdCur !== e) return; place(); requestAnimationFrame(tick); };
+    place(); requestAnimationFrame(tick);
   }
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
