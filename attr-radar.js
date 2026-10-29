@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.11.3';
-  const CHANGES = '리뷰: 방송 중 품절이 있었던 상품은 비중표에 수요비중(판매 + 놓친 판매) 칸이 생기고, 리오더 후보·소진 필요와 한눈에 비중 차이도 수요비중 기준으로 봐요. 일찍 품절된 컬러의 판매비중이 낮게 나오던 문제를 보완해요.';
+  const VER = '4.11.4';
+  const CHANGES = '리뷰 리오더 후보: 비중 차이 없이 품절만 있었던 컬러는 그 컬러 놓친 판매가 50개 이상일 때만 올려요(작은 사이즈 하나 품절된 컬러는 품절 파트에만 남음). 근거에 놓친 판매도 붙여요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -896,11 +896,13 @@
       if (x.colors.length) x.colors = share(la.filter(a => a.color !== '-'), 'color');
       if (x.sizes.length) x.sizes = share(la.filter(a => a.size !== '-'), 'size').sort((a, b) => (parseFloat(a.n) || 0) - (parseFloat(b.n) || 0) || String(a.n).localeCompare(b.n)); });
     // 다음 액션 후보 (규칙 기반)
-    const acts = { reorder: [], clear: [], alloc: [] };
+    const acts = { reorder: [], clear: [], alloc: [] }, m0flow = !!flow;
     prods.forEach(x => {
       // v4.11: 상품-컬러 단위. 품절 사이즈는 sz로 따로 (화면에서 회색 작게)
       x.colors.forEach(c => { const lb = x.hasDem ? '수요비중' : '판매비중'; if (c.eg >= 10 && c.st >= 50) acts.reorder.push({ p: x.p, n: c.n, sz: [], why: `${lb} ${Math.round(c.esal)}% vs 준비수량비중 ${Math.round(c.sup)}% (+${Math.round(c.eg)}%p) · 주문소진 ${Math.round(c.st)}%` }); if (c.eg <= -10 && c.st < 40) acts.clear.push({ p: x.p, n: c.n, why: `${lb} ${Math.round(c.esal)}% vs 준비수량비중 ${Math.round(c.sup)}% (${Math.round(c.eg)}%p) · 주문가능 ${fmt(c.avail)}` }); });
-      x.attrs.filter(a => a.soldAt).forEach(a => { let o = acts.reorder.find(o => o.p === x.p && o.n === a.color); if (!o) { const c = x.colors.find(c => c.n === a.color); o = { p: x.p, n: a.color, sz: [], why: `방송 중 품절${c && c.dsal !== null ? ` · 수요비중 ${Math.round(c.dsal)}% vs 준비수량비중 ${Math.round(c.sup)}%` : ''}` }; acts.reorder.push(o); } if (a.size !== '-') o.sz.push(a.size); });
+      const cLost = c => x.attrs.filter(a => a.color === c).reduce((s, a) => s + (a.lost || 0), 0);
+      // 비중 차이 없이 품절만 있었던 컬러는 그 컬러 놓친 판매 50개 이상일 때만 리오더 후보 (작은 사이즈 하나 품절은 품절 파트에만)
+      x.attrs.filter(a => a.soldAt).forEach(a => { let o = acts.reorder.find(o => o.p === x.p && o.n === a.color); if (!o) { const lost = cLost(a.color); if (!(lost >= 50) && !(a.lost === undefined && !m0flow)) return; const c = x.colors.find(c => c.n === a.color); o = { p: x.p, n: a.color, sz: [], why: `방송 중 품절${lost ? ` · 놓친 판매 약 ${fmt(lost)}개` : ''}${c && c.dsal !== null ? ` · 수요비중 ${Math.round(c.dsal)}% vs 준비수량비중 ${Math.round(c.sup)}%` : ''}` }; acts.reorder.push(o); } if (a.size !== '-' && !o.sz.includes(a.size)) o.sz.push(a.size); });
       acts.reorder.forEach(o => o.sz && o.sz.sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || String(a).localeCompare(b)));
       if (x.colors.length > 1 || x.sizes.length > 1) acts.alloc.push({ p: x.p, colors: x.colors.filter(c => c.v > 0).sort((a, b) => b.sal - a.sal), sizes: x.sizes });
     });
