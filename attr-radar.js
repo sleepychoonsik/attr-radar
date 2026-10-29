@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.12';
-  const CHANGES = 'PD 메시지: PD석 메시지 307개 방송 4,048건 분석을 반영했어요. 아우터의 인기 컬러에서 사이즈 절반 이상이 지금 속도로 10분 안에 매진될 것 같으면 👕 착장 교체 제안(G)을 띄우고, 매진 전에 다른 컬러로 갈아입자는 초안을 만들어요. 입고 보여달라는 문장은 아우터일 때만 쓰고, 바지·이너는 대서 보여달라고 써요.';
+  const VER = '4.12.1';
+  const CHANGES = '👕 착장 교체 제안을 몇 분 전에 알릴지 ⚙ 설정에서 10분(기본) 또는 15분으로 고를 수 있어요. 15분은 더 일찍 알지만 판매가 치솟는 중에는 예상 시간이 실제보다 길게 나올 수 있어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -13,7 +13,7 @@
   const CFG_KEY = 'attrRadarCfg';
   // 탭 묶음: 지금 순위 | 챙길 것(배지) | 흐름·정리 | 설정
   const TAB_GROUPS = [[['prod', '상품'], ['color', '컬러'], ['top', '속성']], [['surge', '급상승'], ['sold', '품절']], [['graph', '그래프'], ['sum', '리뷰'], ['log', '알림']], [['set', '⚙']]];
-  const DEF = { interval: 5, win: 3, soldPct: 70, soldQty: 10, soldEta: 15, soldMode: '예측', surge: 10, metric: '방송', refreshSel: '', autoRefresh: 0, brand: '', alias: {}, al: { prod: true, color: true, attr: true, surge: true, sold: true, lv: false, end: true }, quietMode: false, ui: {}, sumOpen: false };
+  const DEF = { interval: 5, win: 3, soldPct: 70, soldQty: 10, soldEta: 15, wearMin: 10, soldMode: '예측', surge: 10, metric: '방송', refreshSel: '', autoRefresh: 0, brand: '', alias: {}, al: { prod: true, color: true, attr: true, surge: true, sold: true, lv: false, end: true }, quietMode: false, ui: {}, sumOpen: false };
   let cfg = DEF;
   try { cfg = Object.assign({}, DEF, JSON.parse(localStorage.getItem(CFG_KEY) || '{}')); } catch (e) {}
   if (!cfg.v2) { if (cfg.soldQty === 50) cfg.soldQty = 10; cfg.v2 = true; } // 잔여 50개 기준은 재고 적은 속성이 너무 많이 걸려서 10개로
@@ -447,7 +447,8 @@
       }
     });
     S.colSums = cs;
-    // G 매진 전 착장 교체: 지금 잘 나가는 아우터의 최근 1위 컬러에서 사이즈 절반 이상이 지금 속도로 10분 안에 매진(이미 매진 포함)될 것 같을 때.
+    const wearMin = Number(cfg.wearMin) === 15 ? 15 : 10;
+    // G 매진 전 착장 교체(기준 분은 ⚙ 설정 10/15분): 지금 잘 나가는 아우터의 최근 1위 컬러에서 사이즈 절반 이상이 지금 속도로 10분 안에 매진(이미 매진 포함)될 것 같을 때.
     // 아직 남은 사이즈가 있을 때(매진 전)만, 같은 상품 다른 컬러 잔여 30개 이상이 있을 때만
     { const maxW = Math.max(0, ...P.map(x => x.win || 0));
       P.forEach(x => {
@@ -455,7 +456,7 @@
         const hot = [...x.colors].sort((a, b) => b.win - a.win)[0];
         if (!hot || !(hot.win > 0) || hot.avail <= 0) return;
         const rs = x.rs.filter(r => live(r) && r.color === hot.c), soon = [], left = [];
-        rs.forEach(r => { const rt = rateMap.get(r.key) || 0, a = r.avail || 0; if (a <= 0) soon.push({ z: r.size, done: true }); else if (rt > 0 && a / rt <= 10) soon.push({ z: r.size, eta: a / rt }); else left.push(r.size); });
+        rs.forEach(r => { const rt = rateMap.get(r.key) || 0, a = r.avail || 0; if (a <= 0) soon.push({ z: r.size, done: true }); else if (rt > 0 && a / rt <= wearMin) soon.push({ z: r.size, eta: a / rt }); else left.push(r.size); });
         const pend = soon.filter(o => !o.done);
         if (!rs.length || soon.length < Math.ceil(rs.length / 2) || !pend.length) return;
         const nx = x.colors.filter(o => o.c !== hot.c && o.avail >= 30).sort((a, b) => b.win - a.win || b.sum - a.sum)[0]; if (!nx) return;
@@ -1530,6 +1531,8 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
       <label>품절 알림 기준<select data-k="soldMode"><option ${usePred() ? 'selected' : ''}>예측</option><option ${!usePred() ? 'selected' : ''}>당사</option></select></label>
       <div class="muted">예측(기본) = 아래 두 기준으로 미리 알리고, 당사 매진 기준(소진율 70% 매진예상 · 80% 매진임박 · 95% 매진)은 매진현황(파랑·노랑·빨강)으로 보여줘요. 당사 = 당사 단계가 오를 때만 알려요.</div>
       ${f('soldQty', '예측: 잔여', '개 이하')}${f('soldEta', '예측: 소진 예상', '분 이내')}
+      <label>👕 착장 교체 제안<select data-k="wearMin"><option value="10" ${Number(cfg.wearMin) !== 15 ? 'selected' : ''}>10분 전 (기본)</option><option value="15" ${Number(cfg.wearMin) === 15 ? 'selected' : ''}>15분 전</option></select></label>
+      <div class="muted">아우터 인기 컬러의 사이즈 절반 이상이 이 시간 안에 매진될 것 같을 때 알려요. 15분은 더 일찍 알지만 판매가 치솟는 중엔 예상 시간이 실제보다 길게 나올 수 있어요.</div>
       <h4 style="margin:12px 0 4px">🔔 팝업으로 받을 알림</h4>
       ${[['prod', '🏆 상품 1위 교체'], ['color', '🎨 컬러 1위 교체'], ['wear', '👕 착장 교체 제안'], ['attr', '🥇 속성 1위 교체'], ['surge', '🔥 급상승'], ['sold', '⚠️ 품절 알림'], ['lv', '🔵🟡🔴 당사 매진 단계 (예측 모드)'], ['end', '📋 방송 종료 요약']].map(([k, l]) => `<label>${l}<input data-al="${k}" type="checkbox" ${cfg.al[k] !== false ? 'checked' : ''} style="width:auto"></label>`).join('')}
       <div class="muted">끈 알림도 알림 탭에는 남아요. 제목줄 🔔를 누르면 모든 팝업을 잠시 멈춰요(조용히 모드).</div>
