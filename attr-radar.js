@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.12.2';
-  const CHANGES = 'PD 메시지 버튼을 말풍선 아이콘이 들어간 "PD에게" 버튼으로 바꿨어요. 알림 탭에서는 각 줄 오른쪽 끝에 같은 자리로 붙어요.';
+  const VER = '4.12.3';
+  const CHANGES = 'PD 메시지 버튼을 말풍선 아이콘 + "PD 메시지" 테두리 버튼으로 바꿨어요. 알림 탭에서는 각 줄 오른쪽 끝에 같은 자리로 붙어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -1218,7 +1218,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
 
   function toast(title, msg, e) {
     const t = document.createElement('div'); t.className = 't';
-    t.innerHTML = `<b>${esc(title)}</b><br>${esc(msg)}` + (e && e.pd ? `<div><button class="pdb" data-pd="${e.id}">${PD_ICO} PD에게 보낼 메시지</button></div>` : '');
+    t.innerHTML = `<b>${esc(title)}</b><br>${esc(msg)}` + (e && e.pd ? `<div><button class="pdb" data-pd="${e.id}">${PD_ICO} PD 메시지</button></div>` : '');
     $('.toasts').prepend(t); setTimeout(() => t.remove(), e && e.pd ? 15000 : 8000);
   }
   // PD 메시지 창: 초안 2개(고쳐서 복사) + Claude로 다듬기
@@ -1521,7 +1521,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     const names = [...new Set([...S.rows.values(), ...S.parked.values()].map(r => r.prod))].sort((a, b) => shortP(b).length - shortP(a).length);
     const logP = l => l.p || names.find(p => l.msg.startsWith(shortP(p)));
     const LG = S.log.filter(l => { const p = logP(l); return !p || inScope(p); });
-    return LG.length ? LG.map(l => `<div class="lgr"><span><span class="muted">${hhmmss(l.t)}</span> <b>${esc(l.title)}</b> ${esc(l.msg)}</span>${l.pd && l.id ? `<button class="pdb" data-pd="${l.id}" title="PD석 메시지 초안 보기">${PD_ICO} PD에게</button>` : ''}</div>`).join('') : '<p class="muted">아직 알림이 없어요.</p>';
+    return LG.length ? LG.map(l => `<div class="lgr"><span><span class="muted">${hhmmss(l.t)}</span> <b>${esc(l.title)}</b> ${esc(l.msg)}</span>${l.pd && l.id ? `<button class="pdb" data-pd="${l.id}" title="PD석 메시지 초안 보기">${PD_ICO} PD 메시지</button>` : ''}</div>`).join('') : '<p class="muted">아직 알림이 없어요.</p>';
   }
 
   function settingsHtml() {
