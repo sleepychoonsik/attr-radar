@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
   const VER = '4.12.3';
-  const CHANGES = 'PD 메시지 버튼을 말풍선 아이콘 + "PD 메시지" 테두리 버튼으로 바꿨어요. 알림 탭에서는 각 줄 오른쪽 끝에 같은 자리로 붙어요.';
+  const CHANGES = 'PD 메시지 버튼을 말풍선 아이콘 + "PD 메시지" 연한 파란 칩으로 바꿨어요. 알림 탭에서는 각 줄 오른쪽 끝에 같은 자리로 붙어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -1186,7 +1186,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .set label{display:flex;justify-content:space-between;align-items:center;margin:5px 0}.set input{width:60px}
     .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.btns button{border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit}
     .toasts{position:fixed;right:16px;top:16px;display:flex;flex-direction:column;gap:6px}
-    .pdb{margin-top:6px;border:1px solid #0088ff;border-radius:12px;padding:2px 9px;background:#fff;color:#0070d6;cursor:pointer;font:inherit;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.pdb:hover{background:#0088ff;color:#fff}.pdi{flex:none}.lgr{display:flex;align-items:flex-start;gap:6px}.lgr>span{flex:1;min-width:0}
+    .pdb{margin-top:6px;border:0;border-radius:4px;padding:2px 8px;background:#eef6ff;color:#0062b8;cursor:pointer;font:inherit;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.pdb:hover{background:#d6e9ff}.pdi{flex:none}.lgr{display:flex;align-items:flex-start;gap:6px}.lgr>span{flex:1;min-width:0}
     .pdbox{position:fixed;right:360px;top:16px;width:380px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #d0d7de;border-radius:10px;padding:10px 12px;box-shadow:0 6px 20px rgba(0,0,0,.25);z-index:2;font-size:13px}
     .pdbox[hidden]{display:none}.pdbox .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}.pdbox .ph button{border:0;background:none;cursor:pointer;font-size:14px}
     .pdbox .po{display:flex;gap:6px;align-items:flex-start;margin-top:8px}.pdbox textarea{flex:1;font:inherit;font-size:13px;border:1px solid #d0d7de;border-radius:6px;padding:4px 6px;resize:vertical}.pdbox .po button{border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit;white-space:nowrap}
