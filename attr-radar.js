@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.9.1';
-  const CHANGES = '컬러 탭에서 상품 합계가 매진현황 칸 밑에 붙던 것을 판매 칸으로 맞췄어요. 소진 예측은 방송 종료 전에 소진될 속성만 알리고, 그래프는 1분 단위 + 지금 구간/방송 전체로 볼 수 있어요.';
+  const VER = '4.10';
+  const CHANGES = '컬러 탭에서 상품 합계가 매진현황 칸 밑에 붙던 것을 판매 칸으로 맞췄어요. 소진 예측은 방송 종료 전에 소진될 속성만 알리고, 그래프는 1분 단위 + 지금 구간/방송 전체로 볼 수 있어요. 알림 팝업과 알림 탭에 ✉ PD 메시지 버튼이 생겼어요. 실제 MD→PD 메시지를 6가지 상황으로 묶은 문장 틀에 레이더 숫자를 채워 초안 2개를 만들고, Claude로 다듬기 프롬프트도 복사할 수 있어요. 리뷰의 품절 후 상품 분당 판매에 해석(±10%)을 붙였어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -440,7 +440,7 @@
         if (!prev) S.lastTopCol.set(x.p, c0.c);
         else if (prev !== c0.c) {
           const old = x.colors.find(o => o.c === prev);
-          if (swOK('c:' + x.p, c0.c, c0.sum, old ? old.sum : null)) { alert('🎨 컬러 1위 교체', `${shortP(x.p)} ${c0.c} (${fmt(c0.sum)})`, 'color', x.p); S.lastTopCol.set(x.p, c0.c); SW.delete('c:' + x.p); }
+          if (swOK('c:' + x.p, c0.c, c0.sum, old ? old.sum : null)) { alert('🎨 컬러 1위 교체', `${shortP(x.p)} ${c0.c} (${fmt(c0.sum)})`, 'color', x.p, { pd: () => pdMake('color', { p: x.p, c: c0.c, sum: c0.sum, win: c0.win, prev, psum: old ? old.sum : null }) }); S.lastTopCol.set(x.p, c0.c); SW.delete('c:' + x.p); }
         } else SW.delete('c:' + x.p);
       }
     });
@@ -450,7 +450,7 @@
       if (!S.lastTopProd) S.lastTopProd = P[0].p;
       else if (S.lastTopProd !== P[0].p) {
         const old = P.find(o => o.p === S.lastTopProd);
-        if (swOK('p', P[0].p, P[0].sum, old ? old.sum : null)) { alert('🏆 상품 1위 교체', `${shortP(P[0].p)} (${fmt(P[0].sum)})`, 'prod', P[0].p); S.lastTopProd = P[0].p; SW.delete('p'); }
+        if (swOK('p', P[0].p, P[0].sum, old ? old.sum : null)) { alert('🏆 상품 1위 교체', `${shortP(P[0].p)} (${fmt(P[0].sum)})`, 'prod', P[0].p, { pd: () => pdMake('prod', { p: P[0].p, sum: P[0].sum, win: P[0].win, prev: old ? old.p : null, pwin: old ? old.win : 0, mins: D.mins }) }); S.lastTopProd = P[0].p; SW.delete('p'); }
       } else SW.delete('p');
     }
 
@@ -469,12 +469,12 @@
       const info = { k: x.r.key, pct: Math.round(x.pct), eta: x.eta !== null ? Math.ceil(x.eta) : null, avail: x.avail };
       const msg = `${short(x.r)} 소진율 ${Math.round(x.pct)}% · 잔여 ${fmt(x.avail)}${x.eta !== null ? ` · 약 ${Math.ceil(x.eta)}분` : ''}`;
       // 당사 단계: 예측 모드에선 매진현황 표시와 알림 탭 기록만, 팝업은 ⚙에서 켤 때만(type 'lv')
-      if (x.lv) once('so:' + x.r.key + ':' + x.lv, 24 * 60, `${LV[x.lv].icon} ${LV[x.lv].name}`, msg, usePred() ? 'lv' : 'sold', x.r.prod, { ...info, lv: x.lv, why: 'pct' });
+      if (x.lv) once('so:' + x.r.key + ':' + x.lv, 24 * 60, `${LV[x.lv].icon} ${LV[x.lv].name}`, msg, usePred() ? 'lv' : 'sold', x.r.prod, { ...info, lv: x.lv, why: 'pct', pd: () => pdMake('sold', x) });
       // 예측: 속성마다 한 번 (매진 단계 전, 잔여가 있을 때)
-      if (usePred() && x.why.length && x.lv < 3 && x.avail > 0) once('so:' + x.r.key + ':p', 24 * 60, '⏱ 소진 예측', msg + (x.lv ? ` · 지금 ${LV[x.lv].icon}${LV[x.lv].name}` : ''), 'sold', x.r.prod, { ...info, lv: x.lv, why: x.why.join('+') });
+      if (usePred() && x.why.length && x.lv < 3 && x.avail > 0) once('so:' + x.r.key + ':p', 24 * 60, '⏱ 소진 예측', msg + (x.lv ? ` · 지금 ${LV[x.lv].icon}${LV[x.lv].name}` : ''), 'sold', x.r.prod, { ...info, lv: x.lv, why: x.why.join('+'), pd: () => pdMake('sold', x) });
     });
     const s = D.list.find(x => live(x.r));
-    if (s && s.d >= cfg.surge) once('su:' + s.r.key, cfg.win, '🔥 급상승', `${short(s.r)} +${fmt(s.d)} / ${Math.max(1, Math.round(D.mins))}분`, 'surge', s.r.prod);
+    if (s && s.d >= cfg.surge) once('su:' + s.r.key, cfg.win, '🔥 급상승', `${short(s.r)} +${fmt(s.d)} / ${Math.max(1, Math.round(D.mins))}분`, 'surge', s.r.prod, { pd: () => pdMake('surge', { r: s.r, d: s.d, mins: D.mins }) });
     render();
   }
 
@@ -491,6 +491,100 @@
   const attrL = r => [r.color, r.size].filter(x => x && x !== '-').join(' ');
   const short = r => `${shortP(r.prod)} ${attrL(r)}`;
 
+  // 품절 전후 5분 상품 분당 판매 변화 해석: 10% 넘게 줄면 품절이 판매를 막음(리오더 우선), 10% 넘게 늘면 매진 소구가 먹혔거나 다른 컬러로 옮겨감
+  const soldEff = o => { const c = (o.after - o.before) / o.before * 100; return c <= -10 ? ' (판매 막힘 → 리오더 우선)' : c >= 10 ? ' (매진 소구 효과·대체 구매)' : ' (영향 적음)'; };
+  // ---------- PD석 메시지 초안 (v4.9) ----------
+  // 실제 MD→PD 메시지(9/21~10/27 생방송 13회)를 6가지 상황으로 묶은 문장 틀. 숫자는 레이더 규칙이 채우고, 문장 다듬기는 틀 또는 Claude, 전송은 MD가 직접.
+  const PD_T = { A: '매진 푸쉬', B: '아소트 매진 임박', C: '매진 발생', D: '컬러 1위 교체', E: '주력 상품 전환', F: '반응 하락' };
+  // 받침: 한글은 글자로, 숫자는 읽는 소리로(66=육, 88=팔). 8 = ㄹ받침
+  const jong = w => {
+    const t = String(w).trim(), ch = t.slice(-1), c = ch.charCodeAt(0);
+    if (c >= 0xAC00 && c <= 0xD7A3) return (c - 0xAC00) % 28;
+    if (/\d/.test(ch)) return { 0: 21, 1: 8, 3: 16, 6: 1, 7: 8, 8: 8 }[ch] || 0;
+    return /[LMN]$/i.test(t) ? 1 : 0;
+  };
+  const ro = w => w + (jong(w) && jong(w) !== 8 ? '으로' : '로');
+  const ga = w => w + (jong(w) ? '이' : '가');
+  const eun = w => w + (jong(w) ? '은' : '는');
+  const colorAvail = (p, c) => { let a = 0, n = 0; S.rows.forEach(r => { if (r.prod === p && r.color === c && live(r)) { a += r.avail || 0; n++; } }); return { a, n }; };
+  // 다음 주력 후보: 같은 상품의 다른 컬러(잔여 30개 이상, 최근 판매 많은 순) → 없으면 지금 구간의 다른 상품
+  function nextPick(p, c) {
+    const V = S.view; if (!V) return null;
+    const x = V.P.find(o => o.p === p);
+    const cc = x && x.colors ? x.colors.filter(o => o.c !== c && o.avail >= 30).sort((a, b) => b.win - a.win || b.sum - a.sum)[0] : null;
+    if (cc) return { lab: cc.c, why: `${cc.c} 잔여 ${fmt(cc.avail)}, 최근 +${fmt(cc.win)}` };
+    const op = V.P.filter(o => o.p !== p && o.avail >= 30).sort((a, b) => b.win - a.win || b.sum - a.sum)[0];
+    return op ? { lab: shortP(op.p), why: `${shortP(op.p)} 잔여 ${fmt(op.avail)}, 최근 +${fmt(op.win)}` } : null;
+  }
+  function pdMake(kind, d) {
+    const mm = m => Math.max(1, Math.round(m || 0));
+    if (kind === 'sold') {
+      const r = d.r, sp = shortP(r.prod), at = attrL(r) || sp, c = r.color && r.color !== '-' ? r.color : null;
+      const eta = d.eta !== null && d.eta !== undefined ? Math.ceil(d.eta) : null, pct = Math.round(d.pct);
+      const why = `${sp} ${at} 잔여 ${fmt(d.avail)} · 소진율 ${pct}%${eta !== null ? ` · 지금 속도로 약 ${eta}분 뒤 소진` : ''}`;
+      if (d.avail <= 0 || d.lv === 3) {
+        const ca = c ? colorAvail(r.prod, c) : null, nx = nextPick(r.prod, c);
+        const all = ca && ca.a <= 0;
+        return { k: 'C', why: why + (nx ? ` · 다음 후보 ${nx.why}` : ''),
+          m1: all ? `${sp} ${c} 전체 매진입니다! 매진으로 한번 크게 소구해주세요` : `${at} 매진입니다! 매진 소식으로 한번 더 밀어주세요`,
+          m2: nx ? `${all ? c : at} 매진으로 밀고 이제 ${nx.lab} 밀어주세요` : `${at} 매진 났어요. 남은 사이즈로 매진 전에 서두르라고 강조해주세요` };
+      }
+      if (c) {
+        const ca = colorAvail(r.prod, c);
+        if (ca.n > 1 && ca.a <= 50) return { k: 'B', why: `${why} · ${c} 사이즈 합계 잔여 ${fmt(ca.a)}`,
+          m1: `${c} 소량이라 한번 대서 보여주시면 아소트 매진 나올 것 같아요`,
+          m2: `${c} 사이즈 합쳐 잔여 ${fmt(ca.a)}개예요. ${c} 착장으로 한번 비춰주세요` };
+      }
+      // 당사 단계(70·80%)에 들어갔으면 그 이름으로, 아직 전이면 '매진예상'이라 부르지 않고 속도로 말한다
+      const soon = eta !== null ? `지금 속도면 약 ${eta}분 뒤 매진이에요` : '곧 매진될 것 같아요';
+      return { k: 'A', why,
+        m1: d.lv ? `${at} ${LV[d.lv].name}이에요, 콜 올라갑니다. 매진 푸쉬 계속 부탁드려요` : `${at} ${soon}. 콜 올라갑니다, 매진 푸쉬 부탁드려요`,
+        m2: d.avail <= 30 ? `${at} ${fmt(d.avail)}개만 더 나가면 매진이에요. 사이즈 마감 강조해주세요` : `${at} 잔여 ${fmt(d.avail)}개${eta !== null ? `, 약 ${eta}분이면 소진돼요.` : '예요.'} 사이즈 마감 강조해주세요` };
+    }
+    if (kind === 'color') {
+      const sp = shortP(d.p);
+      return { k: 'D', why: `${sp} ${d.c} 누적 ${fmt(d.sum)}${d.prev ? `, ${d.prev}${d.psum !== null ? `(${fmt(d.psum)})` : ''} 제치고 1위` : ' 1위'}${d.win ? ` · 최근 +${fmt(d.win)}` : ''}`,
+        m1: `지금 ${d.c} 1등이에요! ${d.c} 대서 먼저 밀어볼까요?`,
+        m2: `${ga(d.c)} 너무 잘 나가네요. ${d.c} 착장으로 한번씩 비춰주세요` };
+    }
+    if (kind === 'prod') {
+      const sp = shortP(d.p), pv = d.prev ? shortP(d.prev) : null, x = d.pwin > 0 ? d.win / d.pwin : null;
+      return { k: 'E', why: `${sp} 누적 ${ro(fmt(d.sum))} 1위${d.win ? ` · 최근 +${fmt(d.win)}` : ''}${pv ? ` (${pv} 최근 +${fmt(d.pwin)})` : ''}`,
+        m1: `${ro(sp)} 확 몰립니다! ${sp} 먼저 푸쉬해주세요`,
+        m2: pv ? `${sp} 콜이 ${x && x >= 1.5 ? `${x.toFixed(1)}배 ` : '더 '}빨라요. 남은 시간 ${sp} 위주로 가고 ${eun(pv)} 코디로 보여주세요` : `${sp} 반응 제일 좋아요. 남은 시간 ${sp} 위주로 부탁드려요` };
+    }
+    if (kind === 'surge') {
+      const r = d.r, sp = shortP(r.prod), at = attrL(r), c = r.color && r.color !== '-' ? r.color : null;
+      return { k: 'E', why: `${sp} ${at} 최근 ${mm(d.mins)}분 +${fmt(d.d)} (급상승 1위) · 잔여 ${fmt(r.avail || 0)}`,
+        m1: `${at || sp} ${mm(d.mins)}분 만에 +${fmt(d.d)}, 콜 몰립니다! ${c ? `${c} 대서 ` : ''}한번 더 밀어주세요`,
+        m2: `${ro(sp)} 콜 몰려요. 남은 시간 ${sp} 위주로 푸쉬 부탁드려요` };
+    }
+    return null;
+  }
+  // Claude에 붙여넣을 프롬프트 (회사 Claude 프로젝트에서 사용)
+  function pdPrompt(e) {
+    const d = e.pd;
+    return [
+      '[역할] 홈쇼핑 생방송 중 MD가 PD에게 보낼 메시지 초안을 쓴다.',
+      '[문체] 한두 문장 구어체 지시. "~밀어주세요", "~입어주세요", "~할까요?" 형식. 근거를 짧게 붙인다.',
+      '       예) "모카 1등이에요! 모카 대서 먼저 밀어주세요"',
+      '       예) "핑크 소량이라 한번 대서 보여주시면 아소트 매진 나올 것 같아요"',
+      '       예) "바지 콜이 훨씬 빨라요. 남은 시간 바지 위주로 푸쉬 부탁드려요"',
+      `[상황 유형] ${d.k}. ${PD_T[d.k]}`,
+      `[알림] ${hhmmss(e.t)} ${e.title} ${e.msg}`,
+      `[데이터] ${d.why}`,
+      `[레이더 초안] 1) ${d.m1}  2) ${d.m2}`,
+      '[규칙]',
+      '- 입력에 없는 소재·기능·가격·혜택은 쓰지 않는다.',
+      "- 매진 표현은 당사 기준 단계에 맞춘다: 소진율 70% '매진예상', 80% '매진임박', 95% '매진'.",
+      '[출력]',
+      '안1 (방향: …): 메시지',
+      '  근거: …',
+      '안2 (방향: …): 메시지',
+      '  근거: …',
+    ].join('\n');
+  }
+
   function once(id, mins, title, msg, type, p, x) {
     const last = S.alerted.get(id);
     if (last && Date.now() - last < mins * 60000) return;
@@ -500,15 +594,17 @@
 
   function alert(title, msg, type, p, x) {
     const e = { t: Date.now(), title, msg, p, ...(x || {}), q: S.quiet > 0 ? 1 : 0 }; // q=1: 켠 직후(이미 그런 상태)
+    if (typeof e.pd === 'function') { try { e.pd = e.pd(); } catch (er) { e.pd = null; } }
+    if (!e.pd) delete e.pd; else e.id = String(e.t) + Math.floor(Math.random() * 1000);
     S.log.unshift(e);
     REC.log.unshift(e); recSave();
     S.log.length = Math.min(S.log.length, 100);
     // 켠 직후·상품이 바뀐 직후 2번의 확인은 '이미 그런 상태'라 알림 탭에만 남기고 팝업은 생략
     if (S.quiet > 0) return;
-    popup(title, msg, type);
+    popup(title, msg, type, e);
   }
   // 팝업: 조용히 모드이거나 그 종류를 꺼 두면 알림 탭에만 남김
-  const popup = (title, msg, type) => { if (!cfg.quietMode && (!type || cfg.al[type] !== false)) toast(title, msg); };
+  const popup = (title, msg, type, e) => { if (!cfg.quietMode && (!type || cfg.al[type] !== false)) toast(title, msg, e); };
 
   function cssPath(el) {
     const parts = [];
@@ -834,7 +930,7 @@
     });
     if (m.sold.length) {
       L.push(''); L.push('* 품절');
-      m.sold.forEach(o => L.push(`   -${nm(o.a.p)} ${[o.a.color, o.a.size].filter(v => v !== '-').join(' ')}${o.t ? ` ${hm(o.t)} 품절` : ' 품절'}${o.lost ? ` 놓친 판매 약 ${fmt(o.lost)}개(${o.until ? hm(o.until) + '까지 ' : ''}추정)` : ''}${o.before !== null && o.before > 0 ? ` · 품절 후 상품 분당 판매 ${o.after >= o.before ? '+' : ''}${Math.round((o.after - o.before) / o.before * 100)}%` : ''}${o.a.restock ? ' · 이후 수량 추가됨' : ''}`));
+      m.sold.forEach(o => L.push(`   -${nm(o.a.p)} ${[o.a.color, o.a.size].filter(v => v !== '-').join(' ')}${o.t ? ` ${hm(o.t)} 품절` : ' 품절'}${o.lost ? ` 놓친 판매 약 ${fmt(o.lost)}개(${o.until ? hm(o.until) + '까지 ' : ''}추정)` : ''}${o.before !== null && o.before > 0 ? ` · 품절 후 상품 분당 판매 ${o.after >= o.before ? '+' : ''}${Math.round((o.after - o.before) / o.before * 100)}%${soldEff(o)}` : ''}${o.a.restock ? ' · 이후 수량 추가됨' : ''}`));
     }
     L.push(''); L.push('* 운영계획 (레이더 제안 후보)');
     m.acts.reorder.forEach(o => L.push(`   -리오더 후보: ${nm(o.p)} ${o.n} (${o.why})`));
@@ -864,7 +960,7 @@
     const tbl = (rows, lab) => `<table class="sh"><tr><th>${lab}</th><th>공급</th><th>판매</th><th>차이(%p)</th><th>주문소진</th></tr>${rows.map(o => `<tr><td>${esc(o.n)}</td><td>${Math.round(o.sup)}%</td><td><b>${Math.round(o.sal)}%</b></td><td class="${o.gap >= 10 ? 'up' : o.gap <= -10 ? 'dn' : 'muted'}">${gapTag(o.gap)}${Math.round(o.gap) > 0 ? '+' : ''}${Math.round(o.gap)}</td><td>${Math.round(o.st)}%</td></tr>`).join('')}</table>`;
     m.prods.filter(x => x.colors.length || x.sizes.length).forEach((x, i) => h.push(`<details data-dp="${esc(x.p)}" ${(S.detOpen.has(x.p) ? S.detOpen.get(x.p) : i === 0) ? 'open' : ''}><summary>${esc(nm(x.p))}</summary>${x.colors.length ? tbl(x.colors, '컬러') : ''}${x.sizes.length ? tbl(x.sizes, '사이즈') : ''}</details>`));
     h.push(`<h5 id="sD">D. 품절과 놓친 판매</h5>`);
-    h.push(m.sold.length ? m.sold.map(o => `<div class="row"><span>${esc(nm(o.a.p))} ${esc([o.a.color, o.a.size].filter(v => v !== '-').join(' '))}${o.before !== null && o.before > 0 ? `<div class="muted">품절 후 상품 분당 판매 ${o.after >= o.before ? '+' : ''}${Math.round((o.after - o.before) / o.before * 100)}%</div>` : ''}</span><b class="warn">${o.t ? hm(o.t) : '품절'}</b><span class="muted">${o.lost ? `놓친 약 ${fmt(o.lost)}${o.until ? ` (${hm(o.until)}까지)` : ''}` : ''}</span></div>`).join('') : '<p class="muted">방송 중 품절된 속성이 없어요.</p>');
+    h.push(m.sold.length ? m.sold.map(o => `<div class="row"><span>${esc(nm(o.a.p))} ${esc([o.a.color, o.a.size].filter(v => v !== '-').join(' '))}${o.before !== null && o.before > 0 ? `<div class="muted">품절 후 상품 분당 판매 ${o.after >= o.before ? '+' : ''}${Math.round((o.after - o.before) / o.before * 100)}%${soldEff(o)}</div>` : ''}</span><b class="warn">${o.t ? hm(o.t) : '품절'}</b><span class="muted">${o.lost ? `놓친 약 ${fmt(o.lost)}${o.until ? ` (${hm(o.until)}까지)` : ''}` : ''}</span></div>`).join('') : '<p class="muted">방송 중 품절된 속성이 없어요.</p>');
     h.push(`<h5 id="sE">E. 다음 액션 후보 <span class="muted">(판단은 담당자)</span></h5>`);
     const li = (t, arr) => arr.length ? `<div class="muted" style="margin-top:4px"><b>${t}</b></div>` + arr.map(o => `<div>· ${esc(nm(o.p))} <b>${esc(o.n)}</b> <span class="muted">${esc(o.why)}</span></div>`).join('') : '';
     h.push(li('리오더 후보', m.acts.reorder) + li('소진 필요', m.acts.clear) + (m.prods.some(x => x.mx) ? `<div class="muted" style="margin-top:4px"><b>다음 방송 배분안</b> (이번 판매비중, 상품 안 %)</div>` + m.prods.filter(x => x.mx).map(x => `<div style="margin-top:4px;font-weight:600;font-size:12px">${esc(nm(x.p))}</div>${mxHtml(x.mx, 'sh mx')}`).join('') : '') || '<p class="muted">눈에 띄는 후보가 없어요.</p>');
@@ -901,7 +997,7 @@ ${notes(m).map(t => `<p class="warn">※ ${e(t)}</p>`).join('')}
 ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길이 기준, 시작 시각은 판매로 추정' : m.segs[0].tab ? '방송실적관리 노출분 기준' : '판매로 추정'})</h2><div class="c">${flowSvg}<table><tr><th>구간</th><th>시간</th><th>중심 상품</th><th>판매</th><th>분당</th><th>유형</th><th>피크 5분</th><th>꺾인 시점</th></tr>${m.segs.map(g => `<tr><td>${g.guess ? '주방송 묶음' : g.no + '구간'}</td><td>${hm(g.st)}~${hm(g.en)} (${g.len}분)</td><td style="text-align:left">${e(g.main.map(nm).join(', '))}</td><td>${fmt(g.sum)}</td><td>${fmt(Math.round(g.rate))}</td><td>${g.type || '-'}</td><td>${hm(g.peak.st)}~ +${fmt(g.peak.v)}</td><td>${g.drop ? hm(g.drop) : '-'}</td></tr>`).join('')}</table></div>` : ''}
 <h2>C. 공급비중 vs 판매비중</h2><p class="note">연한 막대 = 공급비중(준비수량), 진한 막대 = 판매비중. ▲ 판매가 공급보다 10%p 이상 많음, ▼ 10%p 이상 적음.</p>
 <div class="g">${P.filter(x => x.colors.length || x.sizes.length).map(x => `<div class="c"><b>${e(nm(x.p))}</b>${x.colors.length ? `<div class="note">컬러</div>${pair(x.colors)}` : ''}${x.sizes.length ? `<div class="note">사이즈</div>${pair(x.sizes)}` : ''}</div>`).join('')}</div>
-<h2>D. 품절과 놓친 판매</h2><div class="c">${m.sold.length ? `<table><tr><th>속성</th><th>품절 시각</th><th>놓친 판매(추정, 상품 판매 끝까지)</th><th>품절 후 상품 분당 판매</th></tr>${m.sold.map(o => `<tr><td>${e(nm(o.a.p))} ${e([o.a.color, o.a.size].filter(v => v !== '-').join(' '))}</td><td>${o.t ? hm(o.t) : '-'}</td><td>${o.lost ? fmt(o.lost) + (o.until ? ` (${hm(o.until)}까지)` : '') : '-'}</td><td>${o.before !== null && o.before > 0 ? `${o.after >= o.before ? '+' : ''}${Math.round((o.after - o.before) / o.before * 100)}%` : '-'}</td></tr>`).join('')}</table><p class="note">놓친 판매 = 품절 직전 10분 속도 × 그 상품 구간의 남은 시간.</p>` : '<p>방송 중 품절된 속성이 없어요.</p>'}</div>
+<h2>D. 품절과 놓친 판매</h2><div class="c">${m.sold.length ? `<table><tr><th>속성</th><th>품절 시각</th><th>놓친 판매(추정, 상품 판매 끝까지)</th><th>품절 후 상품 분당 판매</th></tr>${m.sold.map(o => `<tr><td>${e(nm(o.a.p))} ${e([o.a.color, o.a.size].filter(v => v !== '-').join(' '))}</td><td>${o.t ? hm(o.t) : '-'}</td><td>${o.lost ? fmt(o.lost) + (o.until ? ` (${hm(o.until)}까지)` : '') : '-'}</td><td>${o.before !== null && o.before > 0 ? `${o.after >= o.before ? '+' : ''}${Math.round((o.after - o.before) / o.before * 100)}%${soldEff(o)}` : '-'}</td></tr>`).join('')}</table><p class="note">놓친 판매 = 품절 직전 10분 속도 × 그 상품 구간의 남은 시간. 품절 후 상품 분당 판매 = 품절 전 5분과 후 5분의 상품 판매 속도 비교. 10% 넘게 줄면 품절이 판매를 막은 것(리오더 우선), 10% 넘게 늘면 매진 소구가 먹혔거나 다른 컬러로 옮겨 산 것.</p>` : '<p>방송 중 품절된 속성이 없어요.</p>'}</div>
 <h2>E. 다음 액션 후보 (판단은 담당자)</h2><div class="c">${[['리오더 후보', m.acts.reorder], ['소진 필요', m.acts.clear]].map(([t, a]) => a.length ? `<b>${t}</b><ul>${a.map(o => `<li>${e(nm(o.p))} <b>${e(o.n)}</b> · ${e(o.why)}</li>`).join('')}</ul>` : '').join('') || '<p>공급과 판매 비중 차이가 10%p 넘는 컬러가 없어요.</p>'}${P.some(x => x.mx) ? `<b>다음 방송 배분안 (이번 판매비중, 상품 안 %)</b><div class="g">${P.filter(x => x.mx).map(x => `<div><div class="note">${e(nm(x.p))}</div>${mxHtml(x.mx, 'mx')}</div>`).join('')}</div>` : ''}</div>
 <h2>팀 리뷰 형식 텍스트</h2><pre>${e(txt)}</pre>
 <p class="note">준비수량 = 처음 기록한 시점의 미리+방송+주문가능(방송 중 수량이 늘면 더함). 소진률 = (준비수량−잔여)/준비수량. 분취·분공·달성률은 실적 화면 기준으로 따로 채워 주세요.</p>
@@ -1015,6 +1111,11 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .set label{display:flex;justify-content:space-between;align-items:center;margin:5px 0}.set input{width:60px}
     .btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.btns button{border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit}
     .toasts{position:fixed;right:16px;top:16px;display:flex;flex-direction:column;gap:6px}
+    .pdb{margin-top:6px;border:0;border-radius:6px;padding:3px 8px;background:#0088ff;color:#fff;cursor:pointer;font:inherit;font-size:12px}
+    .pdbox{position:fixed;right:360px;top:16px;width:380px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #d0d7de;border-radius:10px;padding:10px 12px;box-shadow:0 6px 20px rgba(0,0,0,.25);z-index:2;font-size:13px}
+    .pdbox[hidden]{display:none}.pdbox .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}.pdbox .ph button{border:0;background:none;cursor:pointer;font-size:14px}
+    .pdbox .po{display:flex;gap:6px;align-items:flex-start;margin-top:8px}.pdbox textarea{flex:1;font:inherit;font-size:13px;border:1px solid #d0d7de;border-radius:6px;padding:4px 6px;resize:vertical}.pdbox .po button{border:1px solid #d0d7de;background:#f6f8fa;border-radius:6px;padding:4px 8px;cursor:pointer;font:inherit;white-space:nowrap}
+    .log .pdb,.bd .pdb{margin:0 0 0 4px;padding:0 6px;font-size:11px}
     .t{background:#1f2328;color:#fff;border-radius:8px;padding:8px 12px;width:330px;box-shadow:0 4px 14px rgba(0,0,0,.25);animation:f .25s}
     @keyframes f{from{opacity:0;transform:translateY(6px)}}
     .min .tabs,.min .bd,.min .grip,.min .st,.min .band{display:none}
@@ -1036,14 +1137,26 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     .seg{display:inline-flex;border:1px solid #d0d7de;border-radius:6px;overflow:hidden;margin:0 6px 6px 0}.seg button{border:0;background:#fff;padding:3px 8px;cursor:pointer;font:inherit;font-size:12px;color:#57606a}.seg button.on{background:#0088ff;color:#fff}
     .lg{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;margin-top:4px}.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
     svg text{font:11px 'Pretendard Variable',Pretendard,'Malgun Gothic','Apple SD Gothic Neo',sans-serif;fill:#6e7781}
-  </style><div class="toasts"></div><div class="p"><div class="hd"><b>속성 레이더</b><span class="meta"></span><button data-a="brand" class="bb" title="브랜드 고르기"></button><button data-a="quiet" title="조용히 모드"></button><button data-a="min" title="줄이기">_</button><button data-a="close" title="종료">×</button></div>
+  </style><div class="toasts"></div><div class="pdbox" hidden></div><div class="p"><div class="hd"><b>속성 레이더</b><span class="meta"></span><button data-a="brand" class="bb" title="브랜드 고르기"></button><button data-a="quiet" title="조용히 모드"></button><button data-a="min" title="줄이기">_</button><button data-a="close" title="종료">×</button></div>
   <div class="st"></div><div class="bands"></div><div class="sum"></div><div class="tabs">${TAB_GROUPS.map(g => g.map(([k, l]) => `<button data-t="${k}">${l}<span class="bdg${k === 'sold' ? ' red' : ''}" data-b="${k}"></span></button>`).join('')).join('<i class="sep"></i>')}</div><div class="bd"></div><div class="grip" title="끌어서 높이 조절">═══</div><div class="wgrip" title="끌어서 폭 조절"></div><div class="menu" hidden></div></div>`;
   const $ = s => root.querySelector(s);
 
-  function toast(title, msg) {
+  function toast(title, msg, e) {
     const t = document.createElement('div'); t.className = 't';
-    t.innerHTML = `<b>${esc(title)}</b><br>${esc(msg)}`;
-    $('.toasts').prepend(t); setTimeout(() => t.remove(), 8000);
+    t.innerHTML = `<b>${esc(title)}</b><br>${esc(msg)}` + (e && e.pd ? `<div><button class="pdb" data-pd="${e.id}">✉ PD 메시지</button></div>` : '');
+    $('.toasts').prepend(t); setTimeout(() => t.remove(), e && e.pd ? 15000 : 8000);
+  }
+  // PD 메시지 창: 초안 2개(고쳐서 복사) + Claude로 다듬기
+  const copyTxt = (txt, ok) => (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('복사됨', ok), () => prompt('복사해 주세요', txt));
+  function openPd(id) {
+    const e = S.log.find(l => l.id === id); if (!e || !e.pd) return;
+    const d = e.pd, b = $('.pdbox'); S.pdCur = e;
+    b.innerHTML = `<div class="ph"><b>✉ PD석 메시지 · ${d.k}. ${esc(PD_T[d.k])}</b><button data-a="pdx" title="닫기">✕</button></div>
+      <div class="muted">${hhmmss(e.t)} ${esc(e.title)} · ${esc(d.why)}</div>
+      ${[d.m1, d.m2].map((m, i) => `<div class="po"><span class="muted">안${i + 1}</span><textarea data-pm="${i}" rows="2">${esc(m)}</textarea><button data-a="pdc" data-i="${i}">복사</button></div>`).join('')}
+      <div class="btns"><button data-a="pdai">Claude로 다듬기 (프롬프트 복사)</button></div>
+      <p class="muted">골라서 고친 뒤 복사 → 세일즈원 'PD석으로 메시지 전송'에 붙여넣으세요. 레이더는 보내지 않아요.</p>`;
+    b.hidden = false;
   }
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -1333,7 +1446,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     const names = [...new Set([...S.rows.values(), ...S.parked.values()].map(r => r.prod))].sort((a, b) => shortP(b).length - shortP(a).length);
     const logP = l => l.p || names.find(p => l.msg.startsWith(shortP(p)));
     const LG = S.log.filter(l => { const p = logP(l); return !p || inScope(p); });
-    return LG.length ? LG.map(l => `<div><span class="muted">${hhmmss(l.t)}</span> <b>${esc(l.title)}</b> ${esc(l.msg)}</div>`).join('') : '<p class="muted">아직 알림이 없어요.</p>';
+    return LG.length ? LG.map(l => `<div><span class="muted">${hhmmss(l.t)}</span> <b>${esc(l.title)}</b> ${esc(l.msg)}${l.pd && l.id ? ` <button class="pdb" data-pd="${l.id}" title="PD석 메시지 초안">✉</button>` : ''}</div>`).join('') : '<p class="muted">아직 알림이 없어요.</p>';
   }
 
   function settingsHtml() {
@@ -1365,6 +1478,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
 
   // 이벤트
   root.addEventListener('click', e => {
+    const pdb = e.target.closest('[data-pd]'); if (pdb) { openPd(pdb.dataset.pd); return; }
     const mx = e.target.closest('[data-mxv]'); if (mx) { cfg.ui.mxv = mx.dataset.mxv; saveCfg(); return render(); }
     const sc = e.target.closest('[data-sc]'); if (sc) { cfg.ui.scope = sc.dataset.sc; saveCfg(); S.lastTop = null; S.lastTopProd = null; S.lastTopCol = new Map(); return analyze(); }
     const t = e.target.closest('[data-t]'); if (t) { S.tab = t.dataset.t; saveUi(); return render(); }
@@ -1410,6 +1524,9 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     if (a === 'report') saveReport();
     if (a === 'sumcopy') { const m = summary(); if (m) navigator.clipboard?.writeText(summaryText(m)).then(() => toast('리뷰 텍스트 복사됨', 'Teams에 붙여넣고 분취·분공을 채우면 돼요.'), () => prompt('복사해 주세요', summaryText(m))); }
     if (a === 'diag') diag();
+    if (a === 'pdx') { $('.pdbox').hidden = true; S.pdCur = null; }
+    if (a === 'pdc') { const ta = root.querySelector(`[data-pm="${e.target.closest('[data-i]').dataset.i}"]`); if (ta) copyTxt(ta.value, "세일즈원 'PD석으로 메시지 전송'에 붙여넣으세요."); }
+    if (a === 'pdai' && S.pdCur) copyTxt(pdPrompt(S.pdCur), '회사 Claude에 붙여넣으면 메시지 2안과 근거를 써 줘요.');
     if (a === 'reset' && confirm('오늘 쌓인 기록을 모두 지울까요? 필요하면 먼저 CSV로 내려받으세요.')) {
       S.rows.clear(); S.hist = []; S.log = []; S.lastTop = null; S.alerted.clear();
       REC.keys = []; REC.idx.clear(); REC.ch = []; REC.log = []; try { localStorage.removeItem(REC.key); } catch (e) {}
