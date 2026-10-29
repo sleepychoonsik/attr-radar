@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.11.1';
-  const CHANGES = '리뷰 구간 머리줄에 방송실적관리 노출분과 가중분(방송 종료 후 표에 뜨는 값, 같은 구간 상품 합)을 분:초로 보여줘요. 한눈에 첫 줄은 품절 건수·놓친 판매를 빼고 연쇄 품절만 남겼어요(머리말과 겹침).';
+  const VER = '4.11.2';
+  const CHANGES = '리뷰: 컬러는 주문수량관리 표 순서대로, 준비수량비중은 준비준비수량비중으로 이름을 바꿨어요. 품절 해석은 놓친 판매 50개 이상일 때만 리오더 우선으로 보고, 남은 주문가능 N분 판매분 표시는 뺐어요. 구간 머리줄에 노출·가중·가중률을 함께 보여줘요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -494,7 +494,8 @@
   const short = r => `${shortP(r.prod)} ${attrL(r)}`;
 
   // 품절 전후 5분 상품 분당 판매 변화 해석: 10% 넘게 줄면 품절이 판매를 막음(리오더 우선), 10% 넘게 늘면 매진 소구가 먹혔거나 다른 컬러로 옮겨감
-  const soldEff = o => { const c = (o.after - o.before) / o.before * 100; return c <= -10 ? ' (판매 막힘 → 리오더 우선)' : c >= 10 ? ' (판매 상승 중 품절 → 인기 속성)' : ' (영향 적음)'; };
+  // 품절 후 상품 분당 판매 해석: 줄어도 놓친 판매가 50개 미만이면 자연 감소로 봄
+  const soldEff = o => { const c = (o.after - o.before) / o.before * 100; return c <= -10 ? ((o.lost || 0) >= 50 ? ' (판매 막힘 → 리오더 우선)' : ' (상품 판매 감소 · 품절 영향 작음)') : c >= 10 ? ' (판매 상승 중 품절 → 인기 속성)' : ' (영향 적음)'; };
   // ---------- PD석 메시지 초안 (v4.9) ----------
   // 실제 MD→PD 메시지(9/21~10/27 생방송 13회)를 6가지 상황으로 묶은 문장 틀. 숫자는 레이더 규칙이 채우고, 문장 다듬기는 틀 또는 Claude, 전송은 MD가 직접.
   const PD_T = { A: '매진 푸쉬', B: '아소트 매진 임박', C: '매진 발생', D: '컬러 1위 교체', E: '주력 상품 전환', F: '반응 하락' };
@@ -739,7 +740,6 @@
     if (!tot || (rows.length < 2 && cols.length < 2)) return null;
     const cell = {}; la.forEach(a => { const k = a.color + '|' + a.size; cell[k] = (cell[k] || 0) + val(a.last); });
     const pc = v => v / tot * 100;
-    rows.sort((a, b) => cols.reduce((s, z) => s + (cell[b + '|' + z] || 0), 0) - cols.reduce((s, z) => s + (cell[a + '|' + z] || 0), 0));
     return { rows, cols, tot, pc: (r, z) => (cell[r + '|' + z] === undefined ? null : pc(cell[r + '|' + z])), rs: r => pc(cols.reduce((s, z) => s + (cell[r + '|' + z] || 0), 0)), cs: z => pc(rows.reduce((s, r) => s + (cell[r + '|' + z] || 0), 0)) };
   }
   const mxHtml = (m, cls) => {
@@ -780,7 +780,7 @@
     const share = (as, f) => {
       const m = new Map(), sup = as.reduce((s, a) => s + a.supply, 0) || 1, sal = as.reduce((s, a) => s + a.v, 0) || 1;
       as.forEach(a => { const k = a[f]; if (!m.has(k)) m.set(k, { n: k, supply: 0, v: 0, avail: 0 }); const o = m.get(k); o.supply += a.supply; o.v += a.v; o.avail += a.avail; });
-      return [...m.values()].map(o => ({ ...o, sup: o.supply / sup * 100, sal: o.v / sal * 100, gap: o.v / sal * 100 - o.supply / sup * 100, st: o.supply > 0 ? (o.supply - o.avail) / o.supply * 100 : 0 })).sort((a, b) => b.supply - a.supply);
+      return [...m.values()].map(o => ({ ...o, sup: o.supply / sup * 100, sal: o.v / sal * 100, gap: o.v / sal * 100 - o.supply / sup * 100, st: o.supply > 0 ? (o.supply - o.avail) / o.supply * 100 : 0 }));
     };
     const prods = [...byP.entries()].map(([p, as]) => {
       const la = as.filter(a => !a.agg);
@@ -894,7 +894,7 @@
     const acts = { reorder: [], clear: [], alloc: [] };
     prods.forEach(x => {
       // v4.11: 상품-컬러 단위. 품절 사이즈는 sz로 따로 (화면에서 회색 작게)
-      x.colors.forEach(c => { if (c.gap >= 10 && c.st >= 50) acts.reorder.push({ p: x.p, n: c.n, sz: [], why: `판매비중 ${Math.round(c.sal)}% vs 수량비중 ${Math.round(c.sup)}% (+${Math.round(c.gap)}%p) · 주문소진 ${Math.round(c.st)}%` }); if (c.gap <= -10 && c.st < 40) acts.clear.push({ p: x.p, n: c.n, why: `판매비중 ${Math.round(c.sal)}% vs 수량비중 ${Math.round(c.sup)}% (${Math.round(c.gap)}%p) · 주문가능 ${fmt(c.avail)}` }); });
+      x.colors.forEach(c => { if (c.gap >= 10 && c.st >= 50) acts.reorder.push({ p: x.p, n: c.n, sz: [], why: `판매비중 ${Math.round(c.sal)}% vs 준비수량비중 ${Math.round(c.sup)}% (+${Math.round(c.gap)}%p) · 주문소진 ${Math.round(c.st)}%` }); if (c.gap <= -10 && c.st < 40) acts.clear.push({ p: x.p, n: c.n, why: `판매비중 ${Math.round(c.sal)}% vs 준비수량비중 ${Math.round(c.sup)}% (${Math.round(c.gap)}%p) · 주문가능 ${fmt(c.avail)}` }); });
       x.attrs.filter(a => a.soldAt).forEach(a => { let o = acts.reorder.find(o => o.p === x.p && o.n === a.color); if (!o) { o = { p: x.p, n: a.color, sz: [], why: '방송 중 품절' }; acts.reorder.push(o); } if (a.size !== '-') o.sz.push(a.size); });
       acts.reorder.forEach(o => o.sz && o.sz.sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || String(a).localeCompare(b)));
       if (x.colors.length > 1 || x.sizes.length > 1) acts.alloc.push({ p: x.p, colors: x.colors.filter(c => c.v > 0).sort((a, b) => b.sal - a.sal), sizes: x.sizes });
@@ -921,7 +921,7 @@
   const soldChg = x => (x.before !== null && x.before > 0 ? `품절 후 상품 분당 판매 ${x.after >= x.before ? '+' : ''}${Math.round((x.after - x.before) / x.before * 100)}%${soldEff(x)}` : '');
   const soldLost = x => (x.lost ? `놓친 판매 약 ${fmt(x.lost)}개(${x.until ? hm(x.until) + '까지 ' : ''}추정)` : '');
   const mmss = v => `${Math.floor(v + 1e-6)}:${String(Math.round((v - Math.floor(v + 1e-6)) * 60)).padStart(2, '0')}`;
-  const segHead = g => `${g.guess ? '주방송 묶음' : g.no + '구간'} · ${g.tab ? `노출 ${mmss(g.xlen / 60000)}` : `${g.len}분`}${g.wlen ? ` · 가중 ${mmss(g.wlen)}` : ''} · ${hm(g.st)}~${hm(g.en)}`;
+  const segHead = g => `${g.guess ? '주방송 묶음' : g.no + '구간'} · ${g.tab ? `노출 ${mmss(g.xlen / 60000)}` : `${g.len}분`}${g.wlen ? ` · 가중 ${mmss(g.wlen)} · 가중률 ${Math.round(g.wlen / (g.xlen / 60000) * 100)}%` : ''} · ${hm(g.st)}~${hm(g.en)}`;
   const isLow = p => /팬츠|데님|슬랙스|트라우저|스커트|쇼츠|진$/.test(p);
   function segInfo(m, g) {
     const ps = m.prods.filter(x => x.seg === g.no), sm = g.ps.reduce((a, o) => a + o.v, 0) || 1;
@@ -934,14 +934,14 @@
     if (g.pre) lines.push(`미리주문 ${fmt(g.pre)}개`);
     return { ps, lines };
   }
-  const prodLine = x => `${nm(x.p)} 판매 ${fmt(x.sum)} · 주문가능 ${fmt(Math.max(0, x.avail))} · 주문소진 ${pct0(x.st)}${x.mins !== null && x.mins !== undefined && x.mins < 120 && x.pkr >= 1 ? ` (남은 주문가능 = 피크 분당 ${fmt(Math.round(x.pkr))}개로 약 ${x.mins}분 판매분)` : ''}`;
+  const prodLine = x => `${nm(x.p)} 판매 ${fmt(x.sum)} · 주문가능 ${fmt(Math.max(0, x.avail))} · 주문소진 ${pct0(x.st)}`;
   function glance(m) {
     const L = [];
     const ch = m.soldG.filter(x => x.z.length > 1).sort((a, b) => b.lost - a.lost)[0]; // 머리말에 품절 건수가 있으니 여기선 연쇄 품절만
     if (ch) L.push(`${nm(ch.p)} ${attrLbl(ch.c, ch.z)} ${soldTime(ch)} 연쇄 품절`);
     m.segs.filter(g => g.lastBest).forEach(g => L.push(`${g.guess ? '주방송 묶음' : g.no + '구간'} 끝 5분(${hm(g.en - 5 * 60000)}~${hm(g.en)})이 구간 최고 · 5분간 ${cfg.metric}주문 +${fmt(g.last5)}개`));
     let best = null; m.prods.forEach(x => x.colors.forEach(c => { if (Math.abs(c.gap) >= 10 && (!best || Math.abs(c.gap) > Math.abs(best.c.gap))) best = { x, c }; }));
-    if (best) L.push(`${nm(best.x.p)} ${best.c.n} 수량비중 ${pct0(best.c.sup)} → 판매비중 ${pct0(best.c.sal)} (${sgn(best.c.gap)}%p)`);
+    if (best) L.push(`${nm(best.x.p)} ${best.c.n} 준비수량비중 ${pct0(best.c.sup)} → 판매비중 ${pct0(best.c.sal)} (${sgn(best.c.gap)}%p)`);
     return L.slice(0, 3);
   }
   const groupsOf = m => { const G = m.segs.length ? m.segs.map(g => ({ g, ps: m.prods.filter(x => x.seg === g.no) })).filter(o => o.ps.length) : [{ g: null, ps: m.prods }]; const rest = m.prods.filter(x => m.segs.length && !x.seg); if (rest.length) G.push({ g: null, ps: rest, etc: true }); return G; };
@@ -955,7 +955,7 @@
     L.push(`· 품절 : ${m.sold.length}건 (컬러·사이즈 기준)`);
     notes(m).forEach(t => L.push(`※ ${t}`));
     const gl = glance(m); if (gl.length) { L.push(''); L.push('■ 한눈에'); gl.forEach((t, i) => L.push(` ${C[i]} ${t}`)); }
-    const tbl = (rows, lab) => { L.push(`   ${lab} | 수량비중 | 판매비중 | 차이(%p) | 주문소진`); rows.forEach(o => L.push(`   ${o.n} | ${pct0(o.sup)} | ${pct0(o.sal)} | ${gapTag(o.gap)}${sgn(o.gap)} | ${pct0(o.st)}`)); };
+    const tbl = (rows, lab) => { L.push(`   ${lab} | 준비수량비중 | 판매비중 | 차이(%p) | 주문소진`); rows.forEach(o => L.push(`   ${o.n} | ${pct0(o.sup)} | ${pct0(o.sal)} | ${gapTag(o.gap)}${sgn(o.gap)} | ${pct0(o.st)}`)); };
     groupsOf(m).forEach(({ g, ps, etc }) => {
       L.push('');
       if (g) { L.push(`■ ${segHead(g)}`); segInfo(m, g).lines.forEach(t => L.push(` - ${t}`)); }
@@ -970,8 +970,8 @@
     L.push(''); L.push('■ 다음 액션 후보 (판단은 담당자)');
     if (m.acts.reorder.length) { L.push(' 리오더 후보'); m.acts.reorder.forEach(o => L.push(`  · ${nm(o.p)}${o.n !== '-' ? ' ' + o.n : ''}${o.sz && o.sz.length ? ` (${o.sz.join(',')})` : ''} - ${o.why}`)); }
     if (m.acts.clear.length) { L.push(' 소진 필요'); m.acts.clear.forEach(o => L.push(`  · ${nm(o.p)} ${o.n} - ${o.why}`)); }
-    if (!m.acts.reorder.length && !m.acts.clear.length) L.push(' 수량비중과 판매비중 차이가 10%p 넘는 컬러·품절 없음');
-    L.push(''); L.push('※ 수량비중 = 컬러·사이즈별 수량이 상품 전체 수량에서 차지하는 비율. 수량 = 레이더가 본 주문가능 + 이미 들어온 주문(방송 중 추가 포함), 기획수량 아님. 주문소진 = 수량 중 주문이 들어온 비율(취소·반품 전).');
+    if (!m.acts.reorder.length && !m.acts.clear.length) L.push(' 준비수량비중과 판매비중 차이가 10%p 넘는 컬러·품절 없음');
+    L.push(''); L.push('※ 준비수량비중 = 컬러·사이즈별 준비수량이 상품 전체 준비수량에서 차지하는 비율. 준비수량 = 레이더가 본 주문가능 + 이미 들어온 주문(방송 중 추가 포함), 기획수량 아님. 주문소진 = 준비수량 중 주문이 들어온 비율(취소·반품 전).');
     return L.join('\n');
   }
 
@@ -985,7 +985,7 @@
     const nt = notes(m); if (nt.length) h.push(`<details class="note1"><summary>⚠ 안내 ${nt.length}건</summary>${nt.map(t => `<div>※ ${esc(t)}</div>`).join('')}</details>`);
     h.push(`<h5 id="sA">${esc(title(m))}</h5><div class="muted">${m.R.bw ? `방송일시 ${esc(ymd(m.R.bw.st))} ${esc(m.R.bw.label)}<br>` : ''}판매 ${cfg.metric}주문 <b>${fmt(m.total)}</b>개 ${cfg.metric === '총' ? `(미리 ${fmt(m.preTot)} + 방송 ${fmt(m.liveTot)})` : `(미리주문 ${fmt(m.preTot)}개 별도)`}<br>품절 <b>${m.sold.length}</b>건 (컬러·사이즈 기준)</div>`);
     const gl = glance(m); if (gl.length) h.push(`<ol class="gl">${gl.map(t => `<li>${esc(t)}</li>`).join('')}</ol>`);
-    const tbl = (rows, lab) => `<table class="sh"><tr><th>${lab}</th><th>수량비중</th><th>판매비중</th><th>차이(%p)</th><th>주문소진</th></tr>${rows.map(o => `<tr><td>${esc(o.n)}</td><td>${pct0(o.sup)}</td><td><b>${pct0(o.sal)}</b></td><td class="${o.gap >= 10 ? 'up' : o.gap <= -10 ? 'dn' : 'muted'}">${gapTag(o.gap)}${sgn(o.gap)}</td><td>${pct0(o.st)}</td></tr>`).join('')}</table>`;
+    const tbl = (rows, lab) => `<table class="sh"><tr><th>${lab}</th><th>준비수량비중</th><th>판매비중</th><th>차이(%p)</th><th>주문소진</th></tr>${rows.map(o => `<tr><td>${esc(o.n)}</td><td>${pct0(o.sup)}</td><td><b>${pct0(o.sal)}</b></td><td class="${o.gap >= 10 ? 'up' : o.gap <= -10 ? 'dn' : 'muted'}">${gapTag(o.gap)}${sgn(o.gap)}</td><td>${pct0(o.st)}</td></tr>`).join('')}</table>`;
     h.push('<div id="sB"></div>');
     let first = true;
     groupsOf(m).forEach(({ g, ps, etc }) => {
@@ -993,7 +993,7 @@
       if (g) h.push(segInfo(m, g).lines.map(t => `<div class="muted">· ${esc(t)}</div>`).join(''));
       ps.forEach(x => {
         const op = S.detOpen.has(x.p) ? S.detOpen.get(x.p) : first; first = false;
-        const sub = `판매 ${fmt(x.sum)} · 주문가능 ${fmt(Math.max(0, x.avail))} · 주문소진 ${pct0(x.st)}${x.mins !== null && x.mins !== undefined && x.mins < 120 && x.pkr >= 1 ? ` · 남은 주문가능 = 피크 분당 ${fmt(Math.round(x.pkr))}개로 약 ${x.mins}분 판매분` : ''}`;
+        const sub = `판매 ${fmt(x.sum)} · 주문가능 ${fmt(Math.max(0, x.avail))} · 주문소진 ${pct0(x.st)}`;
         h.push(x.colors.length || x.sizes.length ? `<details data-dp="${esc(x.p)}" ${op ? 'open' : ''}><summary><b>${esc(nm(x.p))}</b> <span class="muted">${esc(sub)}</span></summary>${x.colors.length ? tbl(x.colors, '컬러') : ''}${x.sizes.length ? tbl(x.sizes, '사이즈') : ''}</details>` : `<div style="margin:4px 0"><b>${esc(nm(x.p))}</b> <span class="muted">${esc(sub)}</span></div>`);
       });
     });
@@ -1004,7 +1004,7 @@
     h.push(`<h5 id="sE">다음 액션 후보 <span class="muted">(판단은 담당자)</span></h5>`);
     const li = (t, arr) => arr.length ? `<div class="muted" style="margin-top:4px"><b>${t}</b></div>` + arr.map(o => `<div>· ${esc(nm(o.p))} <b>${esc(o.n !== '-' ? o.n : '')}</b>${o.sz && o.sz.length ? ` <span class="sz">(${esc(o.sz.join(','))})</span>` : ''} <span class="muted">${esc(o.why)}</span></div>`).join('') : '';
     h.push(li('리오더 후보', m.acts.reorder) + li('소진 필요', m.acts.clear) + (m.prods.some(x => x.mx) ? `<div class="muted" style="margin-top:4px"><b>다음 방송 배분안</b> (이번 판매비중, 상품 안 %)</div>` + m.prods.filter(x => x.mx).map(x => `<div style="margin-top:4px;font-weight:600;font-size:12px">${esc(nm(x.p))}</div>${mxHtml(x.mx, 'sh mx')}`).join('') : '') || '<p class="muted">눈에 띄는 후보가 없어요.</p>');
-    h.push('<p class="muted" style="font-size:11px;margin-top:8px">수량비중 = 컬러·사이즈별 수량이 상품 전체 수량에서 차지하는 비율. 수량 = 레이더가 본 주문가능 + 이미 들어온 주문(방송 중 추가 포함), 기획수량 아님. 주문소진 = 수량 중 주문이 들어온 비율(취소·반품 전).</p>');
+    h.push('<p class="muted" style="font-size:11px;margin-top:8px">준비수량비중 = 컬러·사이즈별 준비수량이 상품 전체 준비수량에서 차지하는 비율. 준비수량 = 레이더가 본 주문가능 + 이미 들어온 주문(방송 중 추가 포함), 기획수량 아님. 주문소진 = 준비수량 중 주문이 들어온 비율(취소·반품 전).</p>');
     return h.join('');
   }
 
@@ -1023,7 +1023,7 @@
       flowSvg = `<svg viewBox="0 0 ${W} ${H}" width="100%">${bands}${yt}${lines}${ticks}</svg><div class="lg">${P.map((x, i) => `<span><i style="background:${C[i % C.length]}"></i>${e(nm(x.p))}</span>`).join('')}</div><p class="note">분당 판매(앞뒤 1분 평균). 배경 띠는 ${m.segs.length && m.segs[0].tab ? '방송실적관리 노출분으로 나눈' : '판매로 추정한'} 구간.</p>`;
     }
     const pair = rows => { const W = 320, rh = 30, H = rows.length * rh + 24, mx = Math.max(1, ...rows.flatMap(o => [o.sup, o.sal])), sx = v => v / mx * (W - 174);
-      return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W * 1.4}px">${rows.map((o, i) => `<text x="0" y="${i * rh + 19}" font-size="13" fill="#1f2328">${e(o.n)}</text><rect x="78" y="${i * rh + 5}" width="${sx(o.sup)}" height="9" fill="#cce7ff"/><rect x="78" y="${i * rh + 15}" width="${sx(o.sal)}" height="9" fill="#0088ff"/><text x="${84 + sx(Math.max(o.sup, o.sal))}" y="${i * rh + 20}" font-size="12" fill="${o.gap >= 10 ? '#d1242f' : o.gap <= -10 ? '#2f6fde' : '#57606a'}">${Math.round(o.sup)}→${Math.round(o.sal)}% ${gapTag(o.gap)}</text>`).join('')}<rect x="0" y="${H - 12}" width="10" height="9" fill="#cce7ff"/><text x="14" y="${H - 4}" font-size="12" fill="#57606a">수량비중</text><rect x="80" y="${H - 12}" width="10" height="9" fill="#0088ff"/><text x="94" y="${H - 4}" font-size="12" fill="#57606a">판매비중</text></svg>`; };
+      return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W * 1.4}px">${rows.map((o, i) => `<text x="0" y="${i * rh + 19}" font-size="13" fill="#1f2328">${e(o.n)}</text><rect x="78" y="${i * rh + 5}" width="${sx(o.sup)}" height="9" fill="#cce7ff"/><rect x="78" y="${i * rh + 15}" width="${sx(o.sal)}" height="9" fill="#0088ff"/><text x="${84 + sx(Math.max(o.sup, o.sal))}" y="${i * rh + 20}" font-size="12" fill="${o.gap >= 10 ? '#d1242f' : o.gap <= -10 ? '#2f6fde' : '#57606a'}">${Math.round(o.sup)}→${Math.round(o.sal)}% ${gapTag(o.gap)}</text>`).join('')}<rect x="0" y="${H - 12}" width="10" height="9" fill="#cce7ff"/><text x="14" y="${H - 4}" font-size="12" fill="#57606a">준비수량비중</text><rect x="80" y="${H - 12}" width="10" height="9" fill="#0088ff"/><text x="94" y="${H - 4}" font-size="12" fill="#57606a">판매비중</text></svg>`; };
     const txt = summaryText(m);
     return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"><title>방송 리뷰 ${e(title(m))}</title><style>
 body{margin:0;background:#f6f8fa;color:#1f2328;font:14px/1.6 'Pretendard Variable',Pretendard,'Malgun Gothic','Apple SD Gothic Neo',sans-serif}.w{max-width:960px;margin:0 auto;padding:28px 16px 60px}
@@ -1036,10 +1036,10 @@ table{border-collapse:collapse;width:100%;font-size:13px}table.mx td,table.mx th
 ${notes(m).map(t => `<p class="warn">※ ${e(t)}</p>`).join('')}
 <h2>A. 상품별 판매</h2><div class="c"><table><tr><th>상품</th><th>판매</th><th>비중</th><th>미리주문</th><th>주문가능</th><th>주문소진</th><th>구간</th></tr>${P.map(x => `<tr><td>${e(x.p)}</td><td><b>${fmt(x.sum)}</b></td><td>${p1(x.pct)}%</td><td>${fmt(x.pre)}</td><td>${fmt(Math.max(0, x.avail))}</td><td>${p1(x.st)}%</td><td>${x.seg || '-'}</td></tr>`).join('')}</table><p class="note">주문소진 = 수량(레이더가 본 주문가능 + 이미 들어온 주문) 중 주문이 들어온 비율. 기획수량 기준 아님.</p></div>
 ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길이 기준, 시작 시각은 판매로 추정' : m.segs[0].tab ? '방송실적관리 노출분 기준' : '판매로 추정'})</h2><div class="c">${flowSvg}<table><tr><th>구간</th><th>시간</th><th>중심 상품</th><th>판매</th><th>분당</th><th>유형</th><th>피크 5분</th><th>꺾인 시점</th></tr>${m.segs.map(g => `<tr><td>${g.guess ? '주방송 묶음' : g.no + '구간'}</td><td>${hm(g.st)}~${hm(g.en)} (${g.len}분)</td><td style="text-align:left">${e(g.main.map(nm).join(', '))}</td><td>${fmt(g.sum)}</td><td>${fmt(Math.round(g.rate))}</td><td>${g.type || '-'}</td><td>${hm(g.peak.st)}~ +${fmt(g.peak.v)}</td><td>${g.drop ? hm(g.drop) : '-'}</td></tr>`).join('')}</table></div>` : ''}
-<h2>C. 수량비중 vs 판매비중</h2><p class="note">연한 막대 = 수량비중, 진한 막대 = 판매비중. ▲ 판매가 공급보다 10%p 이상 많음, ▼ 10%p 이상 적음.</p>
+<h2>C. 준비수량비중 vs 판매비중</h2><p class="note">연한 막대 = 준비수량비중, 진한 막대 = 판매비중. ▲ 판매가 공급보다 10%p 이상 많음, ▼ 10%p 이상 적음.</p>
 <div class="g">${P.filter(x => x.colors.length || x.sizes.length).map(x => `<div class="c"><b>${e(nm(x.p))}</b>${x.colors.length ? `<div class="note">컬러</div>${pair(x.colors)}` : ''}${x.sizes.length ? `<div class="note">사이즈</div>${pair(x.sizes)}` : ''}</div>`).join('')}</div>
 <h2>D. 품절과 놓친 판매</h2><div class="c">${m.sold.length ? `<table><tr><th>속성</th><th>품절 시각</th><th>놓친 판매(추정, 상품 판매 끝까지)</th><th>품절 후 상품 분당 판매</th></tr>${m.sold.map(o => `<tr><td>${e(nm(o.a.p))} ${e([o.a.color, o.a.size].filter(v => v !== '-').join(' '))}</td><td>${o.t ? hm(o.t) : '-'}</td><td>${o.lost ? fmt(o.lost) + (o.until ? ` (${hm(o.until)}까지)` : '') : '-'}</td><td>${o.before !== null && o.before > 0 ? `${o.after >= o.before ? '+' : ''}${Math.round((o.after - o.before) / o.before * 100)}%${soldEff(o)}` : '-'}</td></tr>`).join('')}</table><p class="note">놓친 판매 = 품절 직전 10분 속도 × 그 상품 구간의 남은 시간. 품절 후 상품 분당 판매 = 품절 전 5분과 후 5분의 상품 판매 속도 비교. 10% 넘게 줄면 품절이 판매를 막은 것(리오더 우선), 10% 넘게 늘면 판매가 오르는 중에 품절된 인기 속성.</p>` : '<p>방송 중 품절된 속성이 없어요.</p>'}</div>
-<h2>E. 다음 액션 후보 (판단은 담당자)</h2><div class="c">${[['리오더 후보', m.acts.reorder], ['소진 필요', m.acts.clear]].map(([t, a]) => a.length ? `<b>${t}</b><ul>${a.map(o => `<li>${e(nm(o.p))} <b>${e(o.n !== '-' ? o.n : '')}</b>${o.sz && o.sz.length ? ` <span class="note">(${e(o.sz.join(','))})</span>` : ''} · ${e(o.why)}</li>`).join('')}</ul>` : '').join('') || '<p>수량비중과 판매비중 차이가 10%p 넘는 컬러가 없어요.</p>'}${P.some(x => x.mx) ? `<b>다음 방송 배분안 (이번 판매비중, 상품 안 %)</b><div class="g">${P.filter(x => x.mx).map(x => `<div><div class="note">${e(nm(x.p))}</div>${mxHtml(x.mx, 'mx')}</div>`).join('')}</div>` : ''}</div>
+<h2>E. 다음 액션 후보 (판단은 담당자)</h2><div class="c">${[['리오더 후보', m.acts.reorder], ['소진 필요', m.acts.clear]].map(([t, a]) => a.length ? `<b>${t}</b><ul>${a.map(o => `<li>${e(nm(o.p))} <b>${e(o.n !== '-' ? o.n : '')}</b>${o.sz && o.sz.length ? ` <span class="note">(${e(o.sz.join(','))})</span>` : ''} · ${e(o.why)}</li>`).join('')}</ul>` : '').join('') || '<p>준비수량비중과 판매비중 차이가 10%p 넘는 컬러가 없어요.</p>'}${P.some(x => x.mx) ? `<b>다음 방송 배분안 (이번 판매비중, 상품 안 %)</b><div class="g">${P.filter(x => x.mx).map(x => `<div><div class="note">${e(nm(x.p))}</div>${mxHtml(x.mx, 'mx')}</div>`).join('')}</div>` : ''}</div>
 <h2>팀 리뷰 형식 텍스트</h2><pre>${e(txt)}</pre>
 <p class="note">수량 = 처음 기록한 시점의 미리+방송+주문가능(방송 중 수량이 늘면 더함), 기획수량 아님. 주문소진 = (수량−주문가능)/수량.</p>
 </div></body></html>`;
