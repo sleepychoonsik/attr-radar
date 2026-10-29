@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.12.5';
-  const CHANGES = 'PD 메시지 초안 창이 화면 오른쪽 위가 아니라 패널 바로 옆 아래쪽에 붙어요(오른쪽에 자리가 없으면 왼쪽). 패널을 옮기면 같이 따라가요. 버튼은 말풍선 + PD 메시지 연한 파란 칩이에요.';
+  const VER = '4.12.6';
+  const CHANGES = '사이즈 순서를 숫자는 44·55·66·77·88 오름차순, 영문은 XS·S·M·L·XL·XXL 순으로 맞췄어요(속성 탭 매트릭스·리뷰 비중표·품절 사이즈 모두). PD 메시지 초안 창은 패널 옆 아래쪽에 붙어요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -30,6 +30,10 @@
     return [name, '-'];
   };
   const toN = s => (isNum(s) ? parseFloat(s.replace(/,/g, '')) : null);
+  // 사이즈 순서: 숫자(44·55·66…, 95·100…) 오름차순 → 영문(XXS·XS·S·M·L·XL·XXL·XXXL) → FREE 등 나머지
+  const LETTER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '2XL', '3XL'];
+  const sizeKey = z => { const t = String(z || '').trim().toUpperCase(), n = parseFloat(t); if (!isNaN(n) && /^\d/.test(t)) return [0, n, t]; const i = LETTER.indexOf(t.replace(/\s/g, '')); if (i >= 0) return [1, i === 8 ? 6 : i === 9 ? 7 : i, t]; return [2, 0, t]; };
+  const cmpSize = (a, b) => { const x = sizeKey(a), y = sizeKey(b); return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]); };
   const fmt = n => Math.round(n).toLocaleString();
   const hhmmss = t => new Date(t).toTimeString().slice(0, 8);
 
@@ -460,7 +464,7 @@
         const pend = soon.filter(o => !o.done);
         if (!rs.length || soon.length < Math.ceil(rs.length / 2) || !pend.length) return;
         const nx = x.colors.filter(o => o.c !== hot.c && o.avail >= 30).sort((a, b) => b.win - a.win || b.sum - a.sum)[0]; if (!nx) return;
-        const zs = soon.map(o => o.z).filter(z => z && z !== '-').sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0)), et = Math.max(1, Math.ceil(Math.max(...pend.map(o => o.eta)))), all = !left.length;
+        const zs = soon.map(o => o.z).filter(z => z && z !== '-').sort(cmpSize), et = Math.max(1, Math.ceil(Math.max(...pend.map(o => o.eta)))), all = !left.length;
         once('wr:' + x.p + '|' + hot.c, 24 * 60, '👕 착장 교체 제안', `${shortP(x.p)} ${hot.c} ${all ? '전체' : zs.join('·')} 약 ${et}분 안에 매진 예상 → ${nx.c} 잔여 ${fmt(nx.avail)}`, 'wear', x.p, { pd: () => pdMake('wear', { p: x.p, c: hot.c, zs, all, eta: et, n: rs.length, nc: nx.c, navail: nx.avail }) });
       }); }
     S.view = { D, P, top, SO, rateMap };
@@ -762,7 +766,7 @@
   function matrix(la) {
     const val = r => (cfg.metric === '총' ? r.pre + r.live : r.live);
     const rows = [...new Set(la.map(a => a.color))], cols = [...new Set(la.map(a => a.size))];
-    cols.sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || String(a).localeCompare(b));
+    cols.sort(cmpSize);
     const tot = la.reduce((s, a) => s + val(a.last), 0);
     if (!tot || (rows.length < 2 && cols.length < 2)) return null;
     const cell = {}; la.forEach(a => { const k = a.color + '|' + a.size; cell[k] = (cell[k] || 0) + val(a.last); });
@@ -816,7 +820,7 @@
       const ord = supply - avail, cv = CONV[norm(p)] ? CONV[norm(p)].r : null, exq = cv !== null ? ord * cv : null;
       return { p, sum, pre: as.reduce((s, a) => s + (a.agg ? 0 : a.last.pre), 0), live: as.reduce((s, a) => s + (a.agg ? 0 : a.last.live), 0), pct: sum / total * 100, supply, avail, st: supply > 0 ? ord / supply * 100 : 0, ord, conv: cv, exq, est: exq !== null && supply > 0 ? exq / supply * 100 : null,
         colors: la.some(a => a.color !== '-') ? share(la.filter(a => a.color !== '-'), 'color') : [],
-        sizes: la.some(a => a.size !== '-') ? share(la.filter(a => a.size !== '-'), 'size').sort((a, b) => (parseFloat(a.n) || 0) - (parseFloat(b.n) || 0) || String(a.n).localeCompare(b.n)) : [],
+        sizes: la.some(a => a.size !== '-') ? share(la.filter(a => a.size !== '-'), 'size').sort((a, b) => cmpSize(a.n, b.n)) : [],
         attrs: la, folded: as.some(a => a.agg), mx: matrix(la) };
     }).filter(x => x.sum > 0 || x.supply > 0).sort((a, b) => b.sum - a.sum);
     const pIdx = new Map(prods.map((x, i) => [x.p, i]));
@@ -921,7 +925,7 @@
     sold.forEach(o => { if (o.lost) o.a.lost = o.lost; });
     prods.forEach(x => { if (!x.attrs.some(a => a.lost > 0)) return; x.hasDem = true; const la = x.attrs;
       if (x.colors.length) x.colors = share(la.filter(a => a.color !== '-'), 'color');
-      if (x.sizes.length) x.sizes = share(la.filter(a => a.size !== '-'), 'size').sort((a, b) => (parseFloat(a.n) || 0) - (parseFloat(b.n) || 0) || String(a.n).localeCompare(b.n)); });
+      if (x.sizes.length) x.sizes = share(la.filter(a => a.size !== '-'), 'size').sort((a, b) => cmpSize(a.n, b.n)); });
     // 다음 액션 후보 (규칙 기반)
     const acts = { reorder: [], clear: [], alloc: [] }, m0flow = !!flow;
     prods.forEach(x => {
@@ -930,13 +934,13 @@
       const cLost = c => x.attrs.filter(a => a.color === c).reduce((s, a) => s + (a.lost || 0), 0);
       // 비중 차이 없이 품절만 있었던 컬러는 그 컬러 놓친 판매 50개 이상일 때만 리오더 후보 (작은 사이즈 하나 품절은 품절 파트에만)
       x.attrs.filter(a => a.soldAt).forEach(a => { let o = acts.reorder.find(o => o.p === x.p && o.n === a.color); if (!o) { const lost = cLost(a.color); if (!(lost >= 50) && !(a.lost === undefined && !m0flow)) return; const c = x.colors.find(c => c.n === a.color); o = { p: x.p, n: a.color, sz: [], why: `방송 중 품절${lost ? ` · 놓친 판매 약 ${fmt(lost)}개` : ''}${c && c.dsal !== null ? ` · 수요비중 ${Math.round(c.dsal)}% vs 준비수량비중 ${Math.round(c.sup)}%` : ''}` }; acts.reorder.push(o); } if (a.size !== '-' && !o.sz.includes(a.size)) o.sz.push(a.size); });
-      acts.reorder.forEach(o => o.sz && o.sz.sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || String(a).localeCompare(b)));
+      acts.reorder.forEach(o => o.sz && o.sz.sort(cmpSize));
       if (x.colors.length > 1 || x.sizes.length > 1) acts.alloc.push({ p: x.p, colors: x.colors.filter(c => c.v > 0).sort((a, b) => b.sal - a.sal), sizes: x.sizes });
     });
     // 연쇄 품절: 같은 상품·컬러가 5분 안에 이어서 품절되면 한 줄로
     const soldG = [];
     sold.forEach(o => { const l = soldG[soldG.length - 1]; if (l && o.t && l.t2 && l.p === o.a.p && l.c === o.a.color && o.t - l.t2 <= 5 * 60000) { l.z.push(o.a.size); l.t2 = o.t; l.lost += o.lost || 0; } else soldG.push({ p: o.a.p, c: o.a.color, z: [o.a.size], t: o.t, t2: o.t, lost: o.lost || 0, until: o.until, before: o.before, after: o.after }); });
-    soldG.forEach(x => x.z.sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || String(a).localeCompare(b)));
+    soldG.forEach(x => x.z.sort(cmpSize));
     const lostTot = sold.reduce((a, o) => a + (o.lost || 0), 0);
     const preTot = prods.reduce((a, x) => a + x.pre, 0), liveTot = prods.reduce((a, x) => a + x.live, 0);
     const late = !fromTable && R.bw && rows[0].t > R.bw.st + 5 * 60000;
@@ -1338,7 +1342,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
   const pfx = (c, z) => [c, z].filter(v => v && v !== '-').join(' ');
   function topHtml() {
     const { P } = S.view, sm = soMap(), dm = dMap();
-    const sizeSort = (a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || String(a).localeCompare(b);
+    const sizeSort = cmpSize;
     const mv = cfg.ui.mxv === 'sale' ? 'sale' : 'both', mseg = `<span class="seg">${[['both', '판매+잔여'], ['sale', '판매']].map(([k, l]) => `<button data-mxv="${k}" class="${mv === k ? 'on' : ''}">${l}</button>`).join('')}</span>`;
     return scopeBar(mseg) + P.map(x => {
       const lr = x.rs.filter(live);
@@ -1380,7 +1384,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
       const noColor = lr.every(r => r.color === '-'), key = r => (noColor ? r.size : r.color), g = new Map();
       lr.forEach(r => { const k = key(r); if (!g.has(k)) g.set(k, []); g.get(k).push(r); });
       const L = [...g.entries()].map(([k, rs]) => ({ k, rs, v: rs.reduce((a, r) => a + metric(r), 0), d: rs.reduce((a, r) => a + (dm.get(r.key) || 0), 0), a: rs.reduce((a, r) => a + (r.avail || 0), 0) }));
-      if (noColor) L.sort((a, b) => (parseFloat(a.k) || 0) - (parseFloat(b.k) || 0)); else L.sort((a, b) => b.v - a.v);
+      if (noColor) L.sort((a, b) => cmpSize(a.k, b.k)); else L.sort((a, b) => b.v - a.v);
       const top = noColor ? null : L[0], hot = [...L].sort((a, b) => b.d - a.d)[0];
       return gRow(esc(shortP(x.p)), x.sum, x.win, x.avail, lvCount(lr, sm), x.p, 'ph') + L.map(o => gRow(`${o === top ? '👑 ' : ''}${esc(o.k === '-' ? '전체' : o.k)}`, o.v, o.d, o.a, lvCount(o.rs, sm), o.k)).join('') +
         (hot && hot.d > 0 && hot !== L[0] && !noColor ? `<div class="muted">🔥 지금 반응은 <b>${esc(hot.k)}</b>가 가장 빨라요 (+${fmt(hot.d)})</div>` : '');
@@ -1513,7 +1517,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     const rs = P.find(x => x.p === S.heatProd).rs.filter(live);
     if (!rs.length) return `<select data-heat>${P.map(x => `<option ${x.p === S.heatProd ? 'selected' : ''}>${esc(x.p)}</option>`).join('')}</select><p class="muted">이 상품은 접혀 있어 컬러·사이즈별 수치가 없어요. 펼치면 다시 보여요.</p>`;
     const colors = [...new Set(rs.map(r => r.color))].sort((a, b) => rs.filter(r => r.color === b).reduce((s, r) => s + metric(r), 0) - rs.filter(r => r.color === a).reduce((s, r) => s + metric(r), 0));
-    const sizes = [...new Set(rs.map(r => r.size))].sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || a.localeCompare(b));
+    const sizes = [...new Set(rs.map(r => r.size))].sort(cmpSize);
     const mx = Math.max(...rs.map(metric), 1);
     return `<select data-heat>${P.map(x => `<option ${x.p === S.heatProd ? 'selected' : ''}>${esc(x.p)}</option>`).join('')}</select>
       <table style="margin-top:6px"><tr><th></th>${sizes.map(z => `<th>${esc(z)}</th>`).join('')}</tr>
