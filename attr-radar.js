@@ -1,7 +1,7 @@
 // 속성 레이더 - 세일즈원 실시간 판매현황 > 주문수량관리 표를 감시해 잘 나가는 속성을 알려준다.
 (() => {
-  const VER = '4.12.6';
-  const CHANGES = '사이즈 순서를 숫자는 44·55·66·77·88 오름차순, 영문은 XS·S·M·L·XL·XXL 순으로 맞췄어요(속성 탭 매트릭스·리뷰 비중표·품절 사이즈 모두). PD 메시지 초안 창은 패널 옆 아래쪽에 붙어요.';
+  const VER = '4.12.7';
+  const CHANGES = '속성 탭 매트릭스·리뷰 매트릭스·히트맵의 판매량 진하기 색을 하늘색에서 연두색으로 바꿨어요. 매진예상(파랑)과 헷갈리지 않아요. 사이즈는 44→88, XS→S→M→L→XL 순서예요.';
   if (window.__attrRadar) {
     // 같은 버전이면 다시 보이기만, 다른 버전이면 이전 것을 끄고 새로 시작
     if (window.__attrRadar.ver === VER) { window.__attrRadar.show(); return; }
@@ -775,7 +775,7 @@
   }
   const mxHtml = (m, cls) => {
     const L = v => (v === '-' ? '전체' : esc(v)), mx = Math.max(...m.rows.flatMap(r => m.cols.map(z => m.pc(r, z) || 0)));
-    const td = v => (v === null ? '<td class="muted">-</td>' : `<td style="background:rgba(0,136,255,${(0.08 + 0.42 * v / (mx || 1)).toFixed(2)})">${Math.round(v)}%</td>`);
+    const td = v => (v === null ? '<td class="muted">-</td>' : `<td style="background:rgba(112,173,71,${(0.08 + 0.42 * v / (mx || 1)).toFixed(2)})">${Math.round(v)}%</td>`);
     return `<table class="${cls}"><tr><th></th>${m.cols.map(z => `<th>${L(z)}</th>`).join('')}${m.cols.length > 1 ? '<th>합</th>' : ''}</tr>${m.rows.map(r => `<tr><td>${L(r)}</td>${m.cols.map(z => td(m.pc(r, z))).join('')}${m.cols.length > 1 ? `<td><b>${Math.round(m.rs(r))}%</b></td>` : ''}</tr>`).join('')}${m.rows.length > 1 ? `<tr><td><b>합</b></td>${m.cols.map(z => `<td><b>${Math.round(m.cs(z))}%</b></td>`).join('')}${m.cols.length > 1 ? '<td><b>100%</b></td>' : ''}</tr>` : ''}</table>`;
   };
   function summary() {
@@ -1210,7 +1210,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
     table.mx{table-layout:fixed;font-size:12px;margin:2px 0 4px}table.mx th,table.mx td{border:1px solid #eaeef2;padding:2px;text-align:center;font-variant-numeric:tabular-nums}table.mx th{background:#fafbfc;font-weight:600;color:#57606a;font-size:11px}table.mx tr th:first-child{width:68px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     table.mx td small{display:block;color:#d1242f;font-size:10px;line-height:1}table.mx td.tot{background:#fafbfc}table.mx td small.lf{color:#57606a}table.mx td.m3 small.lf{color:#fff}table.mx td small.lf:before{content:'잔 '}
     td.m1{background:#cfe3ff}td.m2{background:#ffe680}td.m3{background:#ff3b30;color:#fff}td.m3 small{color:#fff}td.mp{box-shadow:inset 0 0 0 2px #8250df}
-    .sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px;border:1px solid #d0d7de}.sw.m0{background:rgba(0,136,255,.45)}.sw.m1{background:#cfe3ff}.sw.m2{background:#ffe680}.sw.m3{background:#ff3b30}.sw.mp{box-shadow:inset 0 0 0 2px #8250df;background:#fff}
+    .sw{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px;border:1px solid #d0d7de}.sw.m0{background:rgba(112,173,71,.45)}.sw.m1{background:#cfe3ff}.sw.m2{background:#ffe680}.sw.m3{background:#ff3b30}.sw.mp{box-shadow:inset 0 0 0 2px #8250df;background:#fff}
     .note1{background:#fff8e6;border:1px solid #f5d48a;color:#7a4d00;border-radius:6px;padding:4px 8px;font-size:12px;margin:4px 0}.note1 summary{font-weight:600;font-size:12px}
     .bdg.red:not(:empty){background:#ff3b30}
     .seg{display:inline-flex;border:1px solid #d0d7de;border-radius:6px;overflow:hidden;margin:0 6px 6px 0}.seg button{border:0;background:#fff;padding:3px 8px;cursor:pointer;font:inherit;font-size:12px;color:#57606a}.seg button.on{background:#0088ff;color:#fff}
@@ -1355,7 +1355,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
         const r = lr.find(r => r.color === c && r.size === z);
         if (!r) return '<td class="muted">·</td>';
         const o = sm.get(r.key), d = dm.get(r.key) || 0, tot = (r.pre || 0) + (r.live || 0), pct = tot + (r.avail || 0) > 0 ? Math.round(tot / (tot + (r.avail || 0)) * 100) : 0;
-        const cls = o && o.lv ? 'm' + o.lv : o ? 'mp' : '', bg = o && o.lv ? '' : `background:rgba(0,136,255,${(0.05 + 0.5 * metric(r) / mx).toFixed(2)})`;
+        const cls = o && o.lv ? 'm' + o.lv : o ? 'mp' : '', bg = o && o.lv ? '' : `background:rgba(112,173,71,${(0.05 + 0.5 * metric(r) / mx).toFixed(2)})`;
         const mv = cfg.ui.mxv === 'sale' ? 'sale' : 'both', big = metric(r), sub = mv === 'both' ? `${d ? '+' + fmt(d) : '&nbsp;'}</small><small class="lf">${fmt(r.avail || 0)}` : (d ? '+' + fmt(d) : '');
         return `<td class="${cls}" style="${bg}" title="${esc(pfx(c, z))} · 판매 ${fmt(metric(r))} · 최근 ${wLab()} +${fmt(d)} · 잔여 ${fmt(r.avail || 0)} · 소진 ${pct}%${o ? ' · ' + (o.lv ? LV[o.lv].name : '소진 예측' + (o.eta !== null ? ' 약 ' + Math.ceil(o.eta) + '분' : '')) : ''}"><b>${fmt(big)}</b>${sub ? `<small>${sub}</small>` : ''}</td>`;
       };
@@ -1525,7 +1525,7 @@ ${m.segs.length ? `<h2>B. 구간과 흐름 (${m.segs[0].guess ? '노출분 길�
         const r = rs.find(r => r.color === c && r.size === z);
         if (!r) return '<td class="muted">·</td>';
         const a = metric(r) / mx, d = r.jd;
-        return `<td style="background:rgba(0,136,255,${(0.08 + a * 0.85).toFixed(2)});color:${a > 0.55 ? '#fff' : '#1f2328'}">${fmt(metric(r))}${d ? `<small style="color:${a > 0.55 ? '#fff' : ''}">${sg(d)}</small>` : ''}</td>`;
+        return `<td style="background:rgba(112,173,71,${(0.08 + a * 0.85).toFixed(2)});color:${a > 0.55 ? '#fff' : '#1f2328'}">${fmt(metric(r))}${d ? `<small style="color:${a > 0.55 ? '#fff' : ''}">${sg(d)}</small>` : ''}</td>`;
       }).join('')}</tr>`).join('')}</table><p class="muted">진할수록 많이 팔림 · 작은 숫자는 직전 갱신 대비 증가</p>`;
   }
 
